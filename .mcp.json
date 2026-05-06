@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "guardian": {
+      "command": "guardian-mcp",
+      "env": {
+        "GUARDIAN_MODEL_HINT": "_default"
+      }
+    }
+  }
+}

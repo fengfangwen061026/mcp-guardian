@@ -1,0 +1,35 @@
+[project]
+name = "mcp-guardian"
+version = "1.0.0"
+description = "MCP middleware that hardens Claude Code tools for third-party models"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=1.0",
+    "pytest-timeout>=2.0",
+    "hypothesis>=6.0",
+]
+
+[project.scripts]
+guardian-mcp = "guardian.server:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+timeout = 30
+filterwarnings = [
+    "ignore::DeprecationWarning:pytest_asyncio",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["guardian"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
