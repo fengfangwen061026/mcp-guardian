@@ -34,6 +34,7 @@ class SessionState:
     total_prechecks: int = 0
     ack_successes: int = 0
     pending_fallbacks: dict[str, dict] = field(default_factory=dict)
+    ack_tokens: dict[str, tuple] = field(default_factory=dict)
 
     def get_lock(self, tool_name: str) -> asyncio.Lock:
         if tool_name not in self._locks:

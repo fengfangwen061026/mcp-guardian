@@ -14,57 +14,285 @@ class KnowledgeEntry:
     error_types: tuple[str, ...] = ()
 
 
-EDIT_ENTRIES = [
-    KnowledgeEntry("edit:spec:must_read_first", "guardian_edit_file", "spec", "编辑前必须先 Read", "调用 guardian_edit_file 前必须先调用 guardian_read_file 读取文件当前内容。old_str 必须从实际文件内容中精确复制。", 1, ("old_string_not_found",)),
-    KnowledgeEntry("edit:spec:exact_match", "guardian_edit_file", "spec", "精确匹配规则", "old_str 必须与文件内容逐字符完全一致,包括空格、Tab、换行符、尾部空白、空行。", 2, ("old_string_not_found",)),
-    KnowledgeEntry("edit:spec:unique_match", "guardian_edit_file", "spec", "唯一匹配要求", "old_str 在文件中必须恰好出现 1 次。若匹配到多处,扩展 old_str 范围直到唯一定位。", 2, ("appears_multiple_times",)),
-    KnowledgeEntry("edit:anti:line_number_in_old", "guardian_edit_file", "antipattern", "行号混入 old_str", "guardian_read_file 返回带行号前缀。编辑时 old_str 不得包含行号前缀。", 2, ("old_string_not_found",)),
-    KnowledgeEntry("edit:anti:stale_content", "guardian_edit_file", "antipattern", "使用过期内容", "文件被其他工具修改后,之前读取的内容已失效。每次 edit 前必须重新 read。", 2, ("old_string_not_found",)),
-    KnowledgeEntry("edit:anti:invisible_chars", "guardian_edit_file", "antipattern", "不可见字符差异", "Tab vs 空格、全角空格、零宽字符、BOM 可能造成失败。从 read 结果中直接复制。", 3, ("old_string_not_found",)),
-    KnowledgeEntry("edit:anti:crlf_mismatch", "guardian_edit_file", "antipattern", "CRLF/LF 换行符不一致", "Guardian 有 CRLF/LF 归一化容错,但混用换行符仍可能失败。", 3, ("old_string_not_found",)),
-    KnowledgeEntry("edit:anti:infinite_retry", "guardian_edit_file", "antipattern", "无限重试循环", "同样的 old_str 失败后不应再次使用完全相同的参数重试。", 2, ("old_string_not_found",)),
-    KnowledgeEntry("edit:example:correct_flow", "guardian_edit_file", "example", "正确的编辑流程", "1) read 当前内容;2) 精确复制片段;3) 构造 new_str;4) edit。", 3, ()),
-    KnowledgeEntry("edit:recovery:fallback_to_write", "guardian_edit_file", "recovery", "降级为整体重写", "若 edit 连续失败 3 次,read 整个文件,在内存中修改,再用 write 整体重写。", 4, ()),
+KNOWLEDGE_BASE = [
+    {
+        "id": "edit:spec:must_read_first",
+        "tool_name": "guardian_edit_file",
+        "category": "spec",
+        "title": "编辑前必须 Read",
+        "content": "调用 guardian_edit_file 前必须先调用 guardian_read_file 读取文件当前内容。old_str 必须从实际返回的 content 字段中精确复制，不得凭记忆或上下文推测。文件被其他工具修改后之前读取的内容立即失效。",
+        "base_priority": 1,
+        "error_types": "old_string_not_found",
+    },
+    {
+        "id": "edit:spec:exact_match",
+        "tool_name": "guardian_edit_file",
+        "category": "spec",
+        "title": "精确匹配规则",
+        "content": "old_str 必须与文件内容逐字符完全一致，包括：空格/Tab 缩进、换行符（LF vs CRLF）、尾部空白、空行数量。一个字符不匹配即报 old_string_not_found。guardian_read_file 返回的 content 带行号前缀（如 '1: xxx'），old_str 中不得包含行号前缀。",
+        "base_priority": 1,
+        "error_types": "old_string_not_found",
+    },
+    {
+        "id": "edit:spec:unique_match",
+        "tool_name": "guardian_edit_file",
+        "category": "spec",
+        "title": "唯一匹配要求",
+        "content": "old_str 在文件中必须恰好出现 1 次。出现多次时返回 appears_multiple_times。修复：扩展 old_str 范围，加入前后各 2-3 行上下文，直到在文件中唯一定位。不要截短 old_str，截短反而增加碰撞概率。",
+        "base_priority": 2,
+        "error_types": "appears_multiple_times",
+    },
+    {
+        "id": "edit:anti:stale_content",
+        "tool_name": "guardian_edit_file",
+        "category": "antipattern",
+        "title": "使用过期内容",
+        "content": "多次编辑同一文件时，每次 guardian_edit_file 成功后文件内容已变。下一次编辑前必须重新 guardian_read_file，不能复用上次读取的内容。",
+        "base_priority": 2,
+        "error_types": "old_string_not_found",
+    },
+    {
+        "id": "edit:anti:invisible_chars",
+        "tool_name": "guardian_edit_file",
+        "category": "antipattern",
+        "title": "不可见字符差异",
+        "content": "Tab vs 空格、全角 vs 半角空格、零宽字符（U+200B/200C/200D）、BOM 标记（U+FEFF）——肉眼看相同但字节不同。唯一可靠方法：从 guardian_read_file 的 content 字段直接复制，不手动重新输入。",
+        "base_priority": 3,
+        "error_types": "old_string_not_found",
+    },
+    {
+        "id": "edit:anti:infinite_retry",
+        "tool_name": "guardian_edit_file",
+        "category": "antipattern",
+        "title": "无限重试循环",
+        "content": "同样的 old_str 连续失败后不应再次使用完全相同参数重试。正确流程：重新 read 文件 → 确认实际内容 → 构造新的精确 old_str。连续 3 次相同失败后改用 guardian_write_file 整体重写。",
+        "base_priority": 2,
+        "error_types": "old_string_not_found",
+    },
+    {
+        "id": "edit:anti:no_context",
+        "tool_name": "guardian_edit_file",
+        "category": "antipattern",
+        "title": "old_str 过短缺乏上下文",
+        "content": "old_str 只包含 1-2 行容易重复的内容（如 'pass'、'return None'、空行），导致 appears_multiple_times。应包含足够上下文（函数签名+函数体，或类名+方法名）使 old_str 在整个文件中唯一。",
+        "base_priority": 2,
+        "error_types": "appears_multiple_times",
+    },
+    {
+        "id": "edit:example:correct_flow",
+        "tool_name": "guardian_edit_file",
+        "category": "example",
+        "title": "正确的编辑流程",
+        "content": "1) guardian_read_file('src/app.py') → 获得带行号的 content  2) 从 content 中找到目标行，去掉行号前缀，精确复制需修改的片段（含缩进/换行）作为 old_str  3) 构造 new_str  4) guardian_edit_file('src/app.py', old_str, new_str)。多处修改时每次 edit 后重新 read。",
+        "base_priority": 3,
+        "error_types": None,
+    },
+    {
+        "id": "edit:recovery:fallback_write",
+        "tool_name": "guardian_edit_file",
+        "category": "recovery",
+        "title": "精确编辑失败后降级为整体重写",
+        "content": "guardian_edit_file 连续失败 3 次后：1) guardian_read_file 读取完整文件  2) 在内存中构造修改后的完整内容  3) guardian_write_file 整体覆写。适用于文件较小（< 500 行）且修改范围较大的场景。",
+        "base_priority": 4,
+        "error_types": "old_string_not_found,appears_multiple_times",
+    },
+    {
+        "id": "edit:recovery:verify_after_edit",
+        "tool_name": "guardian_edit_file",
+        "category": "recovery",
+        "title": "编辑后验证",
+        "content": "guardian_edit_file 返回 success: true 不代表修改语义正确。对关键修改应在 edit 后调用 guardian_read_file 验证目标行已按预期修改，或用 guardian_run_bash 运行相关测试。",
+        "base_priority": 5,
+        "error_types": None,
+    },
+    {
+        "id": "bash:spec:timeout",
+        "tool_name": "guardian_run_bash",
+        "category": "spec",
+        "title": "长时命令必须指定 timeout",
+        "content": "默认 timeout 30000ms 不够。必须手动指定（单位毫秒）：npm install/yarn → 300000，pip install → 180000，cargo build/docker build → 600000，go build/go test → 120000，make/mvn/gradle → 300000。",
+        "base_priority": 1,
+        "error_types": "TimeoutError",
+    },
+    {
+        "id": "bash:spec:noninteractive",
+        "tool_name": "guardian_run_bash",
+        "category": "spec",
+        "title": "交互式命令必须添加非交互参数",
+        "content": "等待 stdin 的命令会卡死直到超时。常用非交互参数：apt-get/apt → -y，npm init → -y，pip → --yes，rm → -f，git merge → --no-edit。检测方法：命令是否需要用户手动输入才能继续。",
+        "base_priority": 2,
+        "error_types": "TimeoutError",
+    },
+    {
+        "id": "bash:spec:cwd",
+        "tool_name": "guardian_run_bash",
+        "category": "spec",
+        "title": "使用 cwd 参数而非 cd &&",
+        "content": "需要在特定目录执行命令时，优先使用 cwd 参数而非 'cd /path && command'。cwd 参数更清晰、不受 shell 转义影响。",
+        "base_priority": 3,
+        "error_types": None,
+    },
+    {
+        "id": "bash:anti:security_block",
+        "tool_name": "guardian_run_bash",
+        "category": "antipattern",
+        "title": "触发安全拦截",
+        "content": "Guardian 拦截以下类别：rm -rf /、mkfs、dd if=/dev/、fork bomb、sudo rm、写入 /etc/ 或 ~/.bashrc、命令替换中的网络下载（eval $(curl ...)）、nc/netcat 监听端口、heredoc 中的网络请求。被拦截时查看 error 字段的具体原因重构命令。",
+        "base_priority": 1,
+        "error_types": "SECURITY",
+    },
+    {
+        "id": "bash:anti:large_output",
+        "tool_name": "guardian_run_bash",
+        "category": "antipattern",
+        "title": "命令输出过大",
+        "content": "stdout 超出预算时会被截断。解决方法：用 head/tail 限制行数，用 grep 过滤关键信息，用 > file.txt 重定向后再 guardian_read_file，或用 | wc -l 先确认行数。",
+        "base_priority": 3,
+        "error_types": "output_truncated",
+    },
+    {
+        "id": "bash:example:test_run",
+        "tool_name": "guardian_run_bash",
+        "category": "example",
+        "title": "运行测试的正确方式",
+        "content": "guardian_run_bash('pytest tests/ -x --tb=short', timeout=120000)。-x 遇到第一个失败停止，--tb=short 减少输出。大型测试套件：先 guardian_run_bash('pytest tests/ --collect-only -q') 了解规模，再针对性运行子集。",
+        "base_priority": 3,
+        "error_types": None,
+    },
+    {
+        "id": "bash:recovery:timeout_retry",
+        "tool_name": "guardian_run_bash",
+        "category": "recovery",
+        "title": "超时后的处理策略",
+        "content": "TimeoutError 时：1) 是长时命令则按 spec:timeout 增加 timeout 值  2) 检查命令是否卡在等待输入（添加 -y 等非交互参数）  3) 是网络操作则检查连通性  4) 复杂命令拆分为多个子步骤分别执行。",
+        "base_priority": 3,
+        "error_types": "TimeoutError",
+    },
+    {
+        "id": "bash:recovery:nonzero_exit",
+        "tool_name": "guardian_run_bash",
+        "category": "recovery",
+        "title": "非零退出码处理",
+        "content": "exit_code != 0 不一定是严重错误。步骤：1) 阅读 stdout 和 stderr 定位实际错误  2) 可忽略：grep 未找到匹配（exit 1）、diff 有差异（exit 1）  3) 需处理：编译错误、测试失败、文件不存在  4) 不要用 || true 掩盖所有错误。",
+        "base_priority": 3,
+        "error_types": "nonzero_exit",
+    },
+    {
+        "id": "read:spec:line_numbers",
+        "tool_name": "guardian_read_file",
+        "category": "spec",
+        "title": "content 字段包含行号前缀",
+        "content": "guardian_read_file 返回的 content 每行带行号前缀，格式为 'N: 实际内容'。将 content 用于 guardian_edit_file 的 old_str 时，必须去掉行号前缀（'1: '、'2: ' 等），只保留冒号后的内容。start_line/end_line 使用 1-indexed 行号。",
+        "base_priority": 1,
+        "error_types": "old_string_not_found",
+    },
+    {
+        "id": "read:spec:range",
+        "tool_name": "guardian_read_file",
+        "category": "spec",
+        "title": "大文件使用行范围",
+        "content": "大文件（> 500 行）应使用 start_line/end_line 只读取需要修改的区域。先用 guardian_grep 定位目标内容的行号，再用 start_line/end_line 精确读取上下文（目标行前后各 5-10 行）。",
+        "base_priority": 3,
+        "error_types": None,
+    },
+    {
+        "id": "read:recovery:not_found",
+        "tool_name": "guardian_read_file",
+        "category": "recovery",
+        "title": "文件不存在时的处理",
+        "content": "返回 ENV_ERROR + file_not_found 时：1) 用 guardian_glob 确认路径  2) 检查大小写（Linux 区分大小写）  3) 确认是否需要先 guardian_write_file 创建  4) 用 guardian_run_bash('pwd') 确认工作目录。",
+        "base_priority": 2,
+        "error_types": "file_not_found",
+    },
+    {
+        "id": "glob:spec:patterns",
+        "tool_name": "guardian_glob",
+        "category": "spec",
+        "title": "glob 模式语法",
+        "content": "* 匹配单层文件名中的任意字符，** 匹配任意层目录，? 匹配单个字符，{a,b} 匹配 a 或 b。常用示例：'**/*.py' 递归所有 Python 文件，'src/**/*.{ts,tsx}'，'tests/test_*.py'。path 参数指定搜索根目录。",
+        "base_priority": 2,
+        "error_types": None,
+    },
+    {
+        "id": "glob:anti:too_broad",
+        "tool_name": "guardian_glob",
+        "category": "antipattern",
+        "title": "模式过宽",
+        "content": "'**/*' 会返回所有文件，结果可能被截断。应加文件扩展名过滤、限制目录层级、使用 path 参数限制搜索范围。了解项目结构时优先用 guardian_run_bash('find . -type f -name \"*.py\" | head -50') 控制输出量。",
+        "base_priority": 3,
+        "error_types": "output_truncated",
+    },
+    {
+        "id": "glob:example:find_file",
+        "tool_name": "guardian_glob",
+        "category": "example",
+        "title": "定位文件的推荐流程",
+        "content": "不确定路径时：1) guardian_glob('**/<filename>') 按文件名搜索  2) guardian_grep('<function_name>', path='.') 按内容搜索  3) guardian_run_bash('find . -name \"<pattern>\" -type f') 用 find 命令。三种方式互补：glob 最快，grep 最精确，find 最灵活。",
+        "base_priority": 3,
+        "error_types": None,
+    },
+    {
+        "id": "grep:spec:usage",
+        "tool_name": "guardian_grep",
+        "category": "spec",
+        "title": "grep 参数说明",
+        "content": "pattern：Python re 语法正则。path：搜索根目录。include：文件名过滤（如 '*.py'）。返回匹配行、文件路径和行号，可直接用于 guardian_read_file 的 start_line 参数。",
+        "base_priority": 2,
+        "error_types": None,
+    },
+    {
+        "id": "grep:anti:regex_escape",
+        "tool_name": "guardian_grep",
+        "category": "antipattern",
+        "title": "正则特殊字符需转义",
+        "content": "pattern 是正则，. * + ? ( ) [ ] { } ^ $ | 有特殊含义。搜索字面字符串时需转义：搜索 'func()' 应写 'func\\(\\)'。或用 guardian_run_bash('grep -F \"func()\" file.py') 的 -F 固定字符串模式。",
+        "base_priority": 3,
+        "error_types": "regex_error",
+    },
+    {
+        "id": "write:spec:overwrite",
+        "tool_name": "guardian_write_file",
+        "category": "spec",
+        "title": "write_file 是整体覆写",
+        "content": "guardian_write_file 完全覆盖目标文件。用于：创建新文件、guardian_edit_file 连续失败后的降级重写、生成配置文件。不要用于局部修改。写入前建议先 guardian_read_file 确认要保留的内容。",
+        "base_priority": 2,
+        "error_types": None,
+    },
+    {
+        "id": "write:anti:encoding",
+        "tool_name": "guardian_write_file",
+        "category": "antipattern",
+        "title": "编码注意事项",
+        "content": "guardian_write_file 使用 UTF-8 写入。原文件是其他编码（GBK、Latin-1）时写入后编码会变化。处理非 UTF-8 文件时先用 guardian_run_bash('file <path>') 确认编码，再决定是否用 iconv 预处理。",
+        "base_priority": 4,
+        "error_types": "encoding_error",
+    },
 ]
 
-BASH_ENTRIES = [
-    KnowledgeEntry("bash:spec:timeout_guide", "guardian_run_bash", "spec", "超时参数指南", "默认超时 30 秒。长时命令必须设置 timeout(毫秒):npm install 300000,pip install 180000,cargo build 600000。", 2, ("TimeoutError", "timeout")),
-    KnowledgeEntry("bash:spec:output_truncation", "guardian_run_bash", "spec", "输出截断规则", "stdout 超过预算会截断。避免 cat 大文件、全盘搜索等大输出。", 3, ()),
-    KnowledgeEntry("bash:spec:non_interactive", "guardian_run_bash", "spec", "非交互模式", "所有命令必须非交互执行。需要确认的加 -y,需要输入的用管道或 heredoc。", 2, ("TimeoutError",)),
-    KnowledgeEntry("bash:anti:tool_assumption", "guardian_run_bash", "antipattern", "假设非标准工具已安装", "不得假设系统有 fd,bat,jq,rg,delta,exa。不确定时先 which 检查。", 2, ("command_not_found", "FileNotFoundError")),
-    KnowledgeEntry("bash:anti:dangerous_commands", "guardian_run_bash", "antipattern", "被安全拦截的危险命令", "格式化、原始磁盘写入、删除根目录、写系统目录、管道进 shell 等会被拦截。", 1, ("SecurityError", "permission_denied")),
-    KnowledgeEntry("bash:anti:windows_path", "guardian_run_bash", "antipattern", "Windows 风格路径", "禁止使用反斜杠路径。所有路径用 Unix 正斜杠。", 4, ("syntax_error", "FileNotFoundError")),
-    KnowledgeEntry("bash:anti:unclosed_quotes", "guardian_run_bash", "antipattern", "引号未闭合", "单引号、双引号、反引号必须成对。heredoc 结束标记必须独占一行。", 3, ("syntax_error",)),
-    KnowledgeEntry("bash:recovery:alternatives", "guardian_run_bash", "recovery", "常用替代命令映射", "fd→find, rg→grep -r, bat→cat, jq→python3 -m json.tool, exa→ls -la。", 3, ("command_not_found",)),
-    KnowledgeEntry("bash:recovery:nonzero", "guardian_run_bash", "recovery", "非零退出排查", "先看 stderr 和 exit_code,不要原样重试。修正路径、依赖或参数后再运行。", 3, ("nonzero_exit",)),
-]
 
-READ_ENTRIES = [
-    KnowledgeEntry("read:spec:line_format", "guardian_read_file", "spec", "返回格式说明", "返回内容每行带行号前缀,N 从 1 开始。start_line/end_line 是行号。", 2, ()),
-    KnowledgeEntry("read:spec:large_file", "guardian_read_file", "spec", "大文件处理", "超过 500 行建议分段读取,避免一次读整个大文件。", 3, ()),
-    KnowledgeEntry("read:anti:offset_as_bytes", "guardian_read_file", "antipattern", "误把行号当字节偏移", "start_line=100 表示从第 100 行开始,不是第 100 字节。", 3, ()),
-]
+def _error_types(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(part.strip() for part in value.split(",") if part.strip())
 
-WRITE_ENTRIES = [
-    KnowledgeEntry("write:spec:full_overwrite", "guardian_write_file", "spec", "整体覆写语义", "content 是文件完整内容,不是追加。追加应先 read、拼接、write。", 2, ()),
-    KnowledgeEntry("write:spec:auto_mkdir", "guardian_write_file", "spec", "自动创建目录", "父目录不存在时自动创建。", 5, ()),
-    KnowledgeEntry("write:anti:empty_content", "guardian_write_file", "antipattern", "content 不可省略", "content 参数必传、不可为 null。创建空文件请传空字符串。", 2, ("ValidationError", "TypeError")),
-    KnowledgeEntry("write:recovery:permission", "guardian_write_file", "recovery", "写入失败排查", "遇到权限或系统目录错误时,改写项目目录内文件,不要绕过权限。", 3, ("PermissionError",)),
-]
 
-GLOB_ENTRIES = [
-    KnowledgeEntry("glob:spec:syntax", "guardian_glob", "spec", "glob 语法要点", "* 匹配单层文件名,** 匹配任意深度目录。不支持正则。", 3, ()),
-    KnowledgeEntry("glob:anti:param_swap", "guardian_glob", "antipattern", "参数混淆", "pattern 是 glob 模式,path 是搜索根目录。", 3, ("ValidationError",)),
-    KnowledgeEntry("glob:recovery:empty", "guardian_glob", "recovery", "无结果时缩放范围", "无结果时先确认 path,再把 pattern 从精确文件名放宽到 **/*.ext。", 4, ()),
+ALL_ENTRIES = [
+    KnowledgeEntry(
+        id=e["id"],
+        tool_name=e["tool_name"],
+        category=e["category"],
+        title=e["title"],
+        content=e["content"],
+        base_priority=e["base_priority"],
+        error_types=_error_types(e.get("error_types")),
+    )
+    for e in KNOWLEDGE_BASE
 ]
-
-GREP_ENTRIES = [
-    KnowledgeEntry("grep:spec:regex_syntax", "guardian_grep", "spec", "正则语法", "pattern 使用 Python re 兼容正则。简单模式优先。", 4, ()),
-    KnowledgeEntry("grep:anti:too_broad", "guardian_grep", "antipattern", "模式过于宽泛", "避免 .*、. 等超宽模式。用 include 限定文件类型。", 3, ("regex_error",)),
-    KnowledgeEntry("grep:recovery:no_match", "guardian_grep", "recovery", "无匹配排查", "无匹配时检查大小写、转义和 include 限制,必要时先 glob 定位文件。", 4, ()),
-]
-
-ALL_ENTRIES = EDIT_ENTRIES + BASH_ENTRIES + READ_ENTRIES + WRITE_ENTRIES + GLOB_ENTRIES + GREP_ENTRIES
+ALL_ENTRIES.extend([
+    KnowledgeEntry("bash:recovery:command_not_found", "guardian_run_bash", "recovery", "命令不存在处理", "command_not_found 时先确认工具是否安装，优先使用系统自带替代命令。", 4, ("command_not_found",)),
+    KnowledgeEntry("write:recovery:permission", "guardian_write_file", "recovery", "写入失败排查", "遇到权限或系统目录错误时，改写项目目录内文件，不要绕过权限。", 3, ("PermissionError",)),
+    KnowledgeEntry("grep:recovery:no_match", "guardian_grep", "recovery", "无匹配排查", "无匹配时检查大小写、转义和 include 限制，必要时先 glob 定位文件。", 4, ()),
+])
 KNOWLEDGE_BY_ID = {e.id: e for e in ALL_ENTRIES}
 KNOWLEDGE_BY_TOOL: dict[str, list[KnowledgeEntry]] = {}
 for e in ALL_ENTRIES:
@@ -118,3 +346,14 @@ def get_static_guidance(tool_name: str, error_type: str | None = None, session=N
     def lookup(entry_id: str) -> float:
         return _offset_from_session(session, entry_id) if session else 0.0
     return select_guidance(tool_name, error_type, offset_lookup=lookup, max_tokens=max_tokens)
+
+
+def get_knowledge_by_tool(tool_name: str) -> list[dict]:
+    return [e for e in KNOWLEDGE_BASE if e["tool_name"] == tool_name]
+
+
+def get_knowledge_by_error_type(error_type: str) -> list[dict]:
+    return [
+        e for e in KNOWLEDGE_BASE
+        if e.get("error_types") and error_type in e["error_types"]
+    ]

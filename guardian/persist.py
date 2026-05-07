@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import sqlite3
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,6 +13,7 @@ from pathlib import Path
 from .knowledge import ALL_ENTRIES
 
 DEFAULT_DB_PATH = Path.home() / ".claude" / "guardian" / "events.db"
+PERSIST_DIR = os.path.expanduser("~/.claude/guardian/sessions")
 _SECRET_RE = re.compile(r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,'\"]+")
 
 
@@ -74,7 +77,7 @@ class OffsetStore:
                 )
             """)
             c.executemany(
-                "INSERT OR IGNORE INTO knowledge_base (id, tool_name, category, title, content, base_priority) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO knowledge_base (id, tool_name, category, title, content, base_priority) VALUES (?, ?, ?, ?, ?, ?)",
                 [(e.id, e.tool_name, e.category, e.title, e.content, e.base_priority) for e in ALL_ENTRIES],
             )
 
@@ -148,4 +151,36 @@ class OffsetStore:
 
 
 async def flush_session(session) -> None:
-    return None
+    os.makedirs(PERSIST_DIR, exist_ok=True)
+    data = getattr(session, "_priority_offsets", {})
+    file_name = f"{session.session_id}_{getattr(session, 'model_hint', '_default')}.json"
+    path = os.path.join(PERSIST_DIR, file_name)
+    dir_name = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(dir=dir_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+async def load_offsets(session_id: str) -> dict | None:
+    path = os.path.join(PERSIST_DIR, f"{session_id}.json")
+    if not os.path.exists(path):
+        prefix = f"{session_id}_"
+        try:
+            matches = [name for name in os.listdir(PERSIST_DIR) if name.startswith(prefix) and name.endswith(".json")]
+        except FileNotFoundError:
+            matches = []
+        if matches:
+            path = os.path.join(PERSIST_DIR, matches[0])
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
