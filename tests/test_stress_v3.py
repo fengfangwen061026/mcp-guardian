@@ -757,7 +757,7 @@ class TestInterceptThroughput:
         with patch("guardian.risk.compute_risk", return_value=0.9):
             for _ in range(20):
                 result = await intercept(sess, "guardian_run_bash", params, db)
-                if result.get("status") == "PRE_CHECK_REQUIRED" or \
+                if result.get("status") in {"MODEL_ACK_REQUIRED", "APPROVAL_REQUIRED"} or \
                    result.get("success") is False:
                     blocked += 1
 

@@ -50,13 +50,17 @@ def precheck_call(session: SessionState, tool_name: str, params: dict) -> dict |
     mode = detect_mode(session)
     if mode == InterceptionMode.PASSIVE:
         return None
+    if risk > 0.85:
+        return _approval_response(tool_name, risk, mode)
     if mode == InterceptionMode.STRICT and risk > 0.6:
-        return _ack_response(session, tool_name, risk, mode)
-    if mode == InterceptionMode.ADAPTIVE and risk > 0.85:
         return _ack_response(session, tool_name, risk, mode)
     if mode == InterceptionMode.ADAPTIVE and risk > 0.6:
         params["_guardian_note"] = "Guardian allowed this medium-risk call in ADAPTIVE mode."
     return None
+
+
+def _approval_response(tool_name: str, risk: float, mode: InterceptionMode) -> dict:
+    return {"success": False, "status": "APPROVAL_REQUIRED", "error": "APPROVAL_REQUIRED", "error_class": "SECURITY", "error_type": "APPROVAL_REQUIRED", "risk": risk, "mode": mode.value, "reasons": [f"{tool_name} 风险分数超过人工审批阈值"]}
 
 
 def _ack_response(session: SessionState, tool_name: str, risk: float, mode: InterceptionMode) -> dict:
@@ -64,7 +68,7 @@ def _ack_response(session: SessionState, tool_name: str, risk: float, mode: Inte
     token = secrets.token_urlsafe(12)
     session.pending_fallbacks[token] = {"tool_name": tool_name, "risk": risk}
     session.ack_tokens[token] = (tool_name, {}, time.time() + 300)
-    return {"success": False, "status": "PRE_CHECK_REQUIRED", "error": "PRE_CHECK_REQUIRED", "error_class": "pre_fail", "error_type": "PRE_CHECK_REQUIRED", "ack_token": token, "risk": risk, "mode": mode.value, "hint": "确认风险后以 _ack 传回 ack_token 重试。"}
+    return {"success": False, "status": "MODEL_ACK_REQUIRED", "error": "MODEL_ACK_REQUIRED", "error_class": "pre_fail", "error_type": "MODEL_ACK_REQUIRED", "ack_token": token, "risk": risk, "mode": mode.value, "hint": "确认中风险后以 _ack 传回 ack_token 重试。"}
 
 
 async def execute_with_fallback(session: SessionState, tool_name: str, params: dict, db=None) -> dict:

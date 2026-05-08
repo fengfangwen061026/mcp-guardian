@@ -7,6 +7,7 @@ import re
 import sqlite3
 import tempfile
 import time
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -76,6 +77,19 @@ class OffsetStore:
                     last_updated REAL
                 )
             """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS approvals (
+                    approval_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    params_json TEXT NOT NULL,
+                    risk REAL NOT NULL,
+                    reasons_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    expires_at REAL NOT NULL
+                )
+            """)
             c.executemany(
                 "INSERT OR REPLACE INTO knowledge_base (id, tool_name, category, title, content, base_priority) VALUES (?, ?, ?, ?, ?, ?)",
                 [(e.id, e.tool_name, e.category, e.title, e.content, e.base_priority) for e in ALL_ENTRIES],
@@ -85,6 +99,51 @@ class OffsetStore:
         with self._conn() as c:
             row = c.execute("SELECT offset FROM priority_offsets WHERE knowledge_id = ?", (knowledge_id,)).fetchone()
             return row[0] if row else 0.0
+
+    async def create_approval(self, session_id: str, tool_name: str, params_json: str, risk: float, reasons_json: str, ttl_seconds: int = 900) -> dict:
+        async with self._lock:
+            return await asyncio.get_event_loop().run_in_executor(None, self._sync_create_approval, session_id, tool_name, params_json, risk, reasons_json, ttl_seconds)
+
+    def _sync_create_approval(self, session_id: str, tool_name: str, params_json: str, risk: float, reasons_json: str, ttl_seconds: int) -> dict:
+        now = time.time()
+        approval_id = uuid.uuid4().hex
+        expires_at = now + ttl_seconds
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO approvals (approval_id, session_id, tool_name, params_json, risk, reasons_json, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (approval_id, session_id, tool_name, params_json, risk, reasons_json, "pending", now, expires_at),
+            )
+        return {"approval_id": approval_id, "expires_at": expires_at}
+
+    async def list_pending_approvals(self, session_id: str | None = None) -> list[dict]:
+        async with self._lock:
+            return await asyncio.get_event_loop().run_in_executor(None, self._sync_list_pending_approvals, session_id)
+
+    def _sync_list_pending_approvals(self, session_id: str | None = None) -> list[dict]:
+        now = time.time()
+        with self._conn() as c:
+            c.execute("UPDATE approvals SET status = 'expired' WHERE status = 'pending' AND expires_at <= ?", (now,))
+            query = "SELECT approval_id, session_id, tool_name, params_json, risk, reasons_json, status, created_at, expires_at FROM approvals WHERE status = 'pending'"
+            args: tuple = ()
+            if session_id:
+                query += " AND session_id = ?"
+                args = (session_id,)
+            query += " ORDER BY created_at ASC"
+            rows = c.execute(query, args).fetchall()
+        return [
+            {
+                "approval_id": row[0],
+                "session_id": row[1],
+                "tool_name": row[2],
+                "params": json.loads(row[3]),
+                "risk": row[4],
+                "reasons": json.loads(row[5]),
+                "status": row[6],
+                "created_at": row[7],
+                "expires_at": row[8],
+            }
+            for row in rows
+        ]
 
     async def record_event(self, session_id: str, tool_name: str, success: bool, params_sig: str, response: dict) -> None:
         async with self._lock:

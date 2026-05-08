@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 
+from .approvals import attach_pending_approval, requires_approval
 from .budget import enforce_budget
 from .circuit import CircuitState, check_and_maybe_auto_unlock, force_half_open, record_result
 from .handlers.edit_file import handle_edit_file
@@ -26,6 +27,7 @@ TOOL_NAMES = {
     "guardian_glob",
     "guardian_grep",
     "guardian_get_spec",
+    "guardian_pending_approvals",
     "guardian_status",
 }
 
@@ -57,6 +59,8 @@ async def dispatch(session: SessionState, tool_name: str, params: dict, store: O
 
     if tool_name == "guardian_get_spec":
         return enforce_budget(await handle_get_spec(session, params.get("tool_name", ""), store), "guardian_get_spec")
+    if tool_name == "guardian_pending_approvals":
+        return enforce_budget(await handle_pending_approvals(session, store), "guardian_pending_approvals")
     if tool_name == "guardian_status":
         return enforce_budget(await handle_status(session), "guardian_status")
 
@@ -64,11 +68,15 @@ async def dispatch(session: SessionState, tool_name: str, params: dict, store: O
     if tool_name == "guardian_run_bash":
         fail = _pre_validate_run_bash(params)
         if fail:
+            if requires_approval(fail):
+                fail = await attach_pending_approval(store, session, tool_name, params, fail)
             await _record(session, store, tool_name, False, params_sig, fail)
             return enforce_budget(fail, tool_name)
 
     intercept = precheck_call(session, tool_name, params) if tool_name in {"guardian_edit_file", "guardian_write_file"} else None
     if intercept:
+        if requires_approval(intercept):
+            intercept = await attach_pending_approval(store, session, tool_name, params, intercept)
         await _record(session, store, tool_name, False, params_sig, intercept)
         return enforce_budget(intercept, tool_name)
 
@@ -95,6 +103,9 @@ async def dispatch(session: SessionState, tool_name: str, params: dict, store: O
         result = await execute_glob(params.get("pattern", ""), params.get("path"))
     else:
         result = await execute_grep(params.get("pattern", ""), params.get("path"), params.get("include"))
+
+    if requires_approval(result):
+        result = await attach_pending_approval(store, session, tool_name, params, result)
 
     success = result.get("success", False)
     if tool_name in {"guardian_edit_file", "guardian_run_bash"}:
@@ -175,6 +186,11 @@ async def handle_get_spec(session: SessionState, tool_name: str, store: OffsetSt
     spec = select_guidance(tool_name, error_type=None, offset_lookup=_make_offset_lookup(store), max_tokens=600, max_entries=5)
     await force_half_open(session, tool_name)
     return {"success": True, "tool_name": tool_name, "spec": spec, "note": "调用 get_spec 后熔断器已切换为 HALF_OPEN,允许重新尝试。"}
+
+
+async def handle_pending_approvals(session: SessionState, store: OffsetStore) -> dict:
+    approvals = await store.list_pending_approvals(session.session_id)
+    return {"success": True, "session_id": session.session_id, "approvals": approvals, "count": len(approvals)}
 
 
 async def handle_status(session: SessionState) -> dict:

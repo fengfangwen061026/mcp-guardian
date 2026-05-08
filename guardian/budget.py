@@ -10,6 +10,7 @@ BUDGET: dict[tuple, int] = {
     ("guardian_glob", True): 500,
     ("guardian_grep", True): 600,
     ("guardian_get_spec", True): 800,
+    ("guardian_pending_approvals", True): 800,
     ("guardian_status", True): 300,
     ("_any", "pre_fail"): 400,
     ("_any", "MODEL_ERROR"): 300,
@@ -19,7 +20,7 @@ BUDGET: dict[tuple, int] = {
     ("_any", "hard_blocked"): 300,
 }
 
-CORE_FIELDS = {"success", "error", "error_class", "error_type", "hint", "exit_code", "path", "note", "circuit_breaker", "warning", "total_lines", "truncated", "shown_lines", "bytes_written", "count", "ack_token", "risk", "mode", "session_id", "execution_mode", "allowed_roots", "read_id", "file_hash", "size", "mtime_ns", "current_file_hash", "expected_file_hash", "dry_run", "backup_path", "status", "decision", "category", "safer_alternative"}
+CORE_FIELDS = {"success", "error", "error_class", "error_type", "hint", "exit_code", "path", "note", "circuit_breaker", "warning", "total_lines", "truncated", "shown_lines", "bytes_written", "count", "ack_token", "approval_id", "expires_at", "risk", "mode", "session_id", "execution_mode", "allowed_roots", "read_id", "file_hash", "size", "mtime_ns", "current_file_hash", "expected_file_hash", "dry_run", "backup_path", "status", "decision", "category", "safer_alternative"}
 SUCCESS_FIELDS: dict[str, list[str]] = {
     "guardian_read_file": ["content"],
     "guardian_run_bash": ["stdout", "stderr"],
@@ -28,6 +29,7 @@ SUCCESS_FIELDS: dict[str, list[str]] = {
     "guardian_glob": ["matches", "truncated_results"],
     "guardian_grep": ["matches", "truncated_results"],
     "guardian_get_spec": ["spec"],
+    "guardian_pending_approvals": ["approvals"],
     "guardian_status": ["tools", "roots"],
 }
 ERROR_FIELDS = ["guidance", "file_content", "stderr", "unlock_hint", "top_error", "targeted_advice", "inline_spec"]
