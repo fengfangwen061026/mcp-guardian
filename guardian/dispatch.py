@@ -190,7 +190,20 @@ async def handle_get_spec(session: SessionState, tool_name: str, store: OffsetSt
 
 async def handle_pending_approvals(session: SessionState, store: OffsetStore) -> dict:
     approvals = await store.list_pending_approvals(session.session_id)
-    return {"success": True, "session_id": session.session_id, "approvals": approvals, "count": len(approvals)}
+    summaries = [
+        {
+            "approval_id": item["approval_id"],
+            "session_id": item["session_id"],
+            "tool_name": item["tool_name"],
+            "risk": item["risk"],
+            "reasons": item["reasons"],
+            "status": item["status"],
+            "created_at": item["created_at"],
+            "expires_at": item["expires_at"],
+        }
+        for item in approvals
+    ]
+    return {"success": True, "session_id": session.session_id, "approvals": summaries, "count": len(summaries)}
 
 
 async def handle_status(session: SessionState) -> dict:

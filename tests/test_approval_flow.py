@@ -51,8 +51,11 @@ async def test_sensitive_path_approval_sanitizes_large_content(session, store, t
 
     assert result["status"] == "APPROVAL_REQUIRED"
     pending = await dispatch(session, "guardian_pending_approvals", {}, store)
-    params = pending["approvals"][0]["params"]
-    assert params["content"] == "[REDACTED_TEXT length=12]"
+    assert pending["approvals"][0]["approval_id"] == result["approval_id"]
+    assert "params" not in pending["approvals"][0]
+    with sqlite3.connect(str(store.db_path)) as conn:
+        params_json = conn.execute("SELECT params_json FROM approvals WHERE approval_id = ?", (result["approval_id"],)).fetchone()[0]
+    assert "[REDACTED_TEXT length=12]" in params_json
 
 
 @pytest.mark.asyncio
@@ -92,10 +95,35 @@ def test_high_risk_precheck_requires_approval_without_ack():
     assert "ack_token" not in result
 
 
+def test_passive_mode_still_requires_high_risk_approval():
+    session = SessionState(session_id="passive_approval_test")
+    session.total_prechecks = 10
+    session.ack_successes = 1
+
+    result = precheck_call(session, "guardian_write_file", {"path": "/etc/app.conf", "content": "x"})
+
+    assert result["status"] == "APPROVAL_REQUIRED"
+
+
+def test_model_ack_is_bound_to_tool_and_params():
+    session = SessionState(session_id="ack_scope_test")
+    session.total_prechecks = 10
+    session.ack_successes = 9
+    params = {"command": "echo test"}
+    with patch("guardian.risk.compute_risk", return_value=0.7):
+        result = precheck_call(session, "guardian_run_bash", params)
+
+    token = result["ack_token"]
+    assert precheck_call(session, "guardian_run_bash", {"command": "echo changed", "_ack": token})["error_type"] == "ack_scope_mismatch"
+    assert precheck_call(session, "guardian_write_file", {"path": "a.txt", "content": "x", "_ack": token})["error_type"] == "ack_scope_mismatch"
+    assert precheck_call(session, "guardian_run_bash", {"command": "echo test", "_ack": token}) is None
+
+
 def test_sanitize_params_redacts_secret_like_keys_and_text_fields():
-    params = sanitize_params({"api_key": "abc", "content": "secret", "nested": {"password": "p"}, "items": [{"token": "t"}]})
+    params = sanitize_params({"api_key": "abc", "content": "secret", "command": "deploy token=abc", "nested": {"password": "p"}, "items": [{"token": "t"}]})
 
     assert params["api_key"] == "[REDACTED]"
     assert params["content"] == "[REDACTED_TEXT length=6]"
+    assert params["command"] == "deploy token=[REDACTED]"
     assert params["nested"]["password"] == "[REDACTED]"
     assert params["items"][0]["token"] == "[REDACTED]"

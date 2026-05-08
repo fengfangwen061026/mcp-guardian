@@ -41,4 +41,5 @@ def test_adaptive_medium_risk_note_and_passive_allows():
     assert precheck_call(session, "guardian_write_file", params) is None
     session.total_prechecks = 10
     session.ack_successes = 1
-    assert precheck_call(session, "guardian_write_file", {"path": "/etc/app.conf", "content": "x"}) is None
+    result = precheck_call(session, "guardian_write_file", {"path": "/etc/app.conf", "content": "x"})
+    assert result["status"] == "APPROVAL_REQUIRED"
