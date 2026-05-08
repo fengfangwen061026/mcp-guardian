@@ -35,6 +35,7 @@ _BRACE_EXEC = re.compile(r"\{[^}]*;[^}]*\}")
 _PRIVILEGE = re.compile(r"\b" + "su" + r"do\b")
 _INTERACTIVE_REPLS = {"python", "python3", "python2", "node", "nodejs", "irb", "pry", "psql", "mysql", "sqlite3", "mongo", "bash", "sh", "zsh", "fish", "vim", "vi", "nano", "emacs", "less", "more", "htop", "top", "btop"}
 _LONG_RUNNING = {"npm install": 300_000, "npm ci": 300_000, "yarn": 300_000, "yarn install": 300_000, "pnpm install": 300_000, "pip install": 180_000, "pip3 install": 180_000, "uv pip": 120_000, "cargo build": 600_000, "cargo test": 300_000, "make": 300_000, "cmake": 300_000, "go build": 120_000, "go test": 120_000, "apt-get": 120_000, "apt ": 120_000, "mvn": 300_000, "gradle": 300_000, "docker build": 600_000}
+_NON_INTERACTIVE_FLAGS = {"-V", "--version", "-v", "--help", "-h"}
 
 
 def _is_interactive(cmd: str) -> bool:
@@ -49,6 +50,8 @@ def _is_interactive(cmd: str) -> bool:
     if name not in _INTERACTIVE_REPLS:
         return False
     if "-c" in tokens or "-m" in tokens:
+        return False
+    if any(t in _NON_INTERACTIVE_FLAGS for t in tokens[1:]):
         return False
     return not [t for t in tokens[1:] if not t.startswith("-")]
 

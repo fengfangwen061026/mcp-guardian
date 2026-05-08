@@ -8,6 +8,8 @@ def test_interactive_detection():
     assert _is_interactive("python script.py") is False
     assert _is_interactive("python -c 'print(1)'") is False
     assert _is_interactive("python -m pip install x") is False
+    assert _is_interactive("python -V") is False
+    assert _is_interactive("python --version") is False
     assert _is_interactive("vim file.txt") is False
     assert _is_interactive("vim") is True
 

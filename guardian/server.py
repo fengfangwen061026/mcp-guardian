@@ -32,7 +32,7 @@ TOOL_DEFINITIONS = [
     Tool(name="guardian_run_bash", description="执行 shell 命令,包含安全检查和超时控制。", inputSchema={"type": "object", "properties": {"command": {"type": "string"}, "cwd": {"type": "string"}, "timeout": {"type": "integer"}, "_ack": {"type": "string"}}, "required": ["command"]}),
     Tool(name="guardian_glob", description="按 glob 模式搜索文件。", inputSchema={"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}}, "required": ["pattern"]}),
     Tool(name="guardian_grep", description="在文件内容中搜索 Python 兼容正则。", inputSchema={"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}, "include": {"type": "string"}}, "required": ["pattern"]}),
-    Tool(name="guardian_get_spec", description="查询某个 guardian 工具的规范和最佳实践。", inputSchema={"type": "object", "properties": {"tool_name": {"type": "string"}, "error_history": {"type": "array"}}, "required": ["tool_name"]}),
+    Tool(name="guardian_get_spec", description="查询某个 guardian 工具的规范和最佳实践。", inputSchema={"type": "object", "properties": {"tool_name": {"type": "string"}, "error_history": {"type": "array", "items": {"type": "object"}}}, "required": ["tool_name"]}),
     Tool(name="guardian_status", description="查看当前 Guardian session 的模式、熔断和计数状态。", inputSchema={"type": "object", "properties": {}}),
 ]
 
