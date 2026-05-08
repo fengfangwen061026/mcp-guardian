@@ -132,12 +132,17 @@ TOOL_DEFINITIONS = [
     ),
     _tool(
         "guardian_grep",
-        "在文件内容中搜索 Python 兼容正则。",
+        "在文件内容中搜索,优先使用 rg,失败时回退 Python。",
         _object_schema(
             {
-                "pattern": {"type": "string", "minLength": 1, "description": "Python regular expression to search for."},
-                "path": {"type": "string", "minLength": 1, "description": "Optional base directory; defaults to current working directory."},
-                "include": {"type": "string", "minLength": 1, "description": "Optional filename glob filter such as *.py."},
+                "pattern": {"type": "string", "minLength": 1, "description": "Pattern to search for; Python regex by default, literal text when literal=true."},
+                "path": {"type": "string", "minLength": 1, "description": "Optional base directory or file; defaults to current working directory."},
+                "include": {"type": "string", "minLength": 1, "description": "Optional filename/path glob filter such as *.py or src/**/*.py."},
+                "exclude": {"type": "string", "minLength": 1, "description": "Optional filename/path glob exclusion."},
+                "context_lines": {"type": "integer", "minimum": 0, "maximum": 20, "description": "Number of surrounding lines before and after each match."},
+                "literal": {"type": "boolean", "description": "Treat pattern as literal text instead of regex."},
+                "case_sensitive": {"type": "boolean", "description": "Whether matching is case-sensitive; defaults to true."},
+                "max_matches": {"type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum matches to return; defaults to 100."},
             },
             ["pattern"],
         ),

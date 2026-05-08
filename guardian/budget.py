@@ -20,7 +20,7 @@ BUDGET: dict[tuple, int] = {
     ("_any", "hard_blocked"): 300,
 }
 
-CORE_FIELDS = {"success", "error", "error_class", "error_type", "hint", "exit_code", "path", "note", "circuit_breaker", "warning", "total_lines", "truncated", "shown_lines", "bytes_written", "count", "ack_token", "approval_id", "expires_at", "risk", "mode", "session_id", "execution_mode", "allowed_roots", "read_id", "file_hash", "size", "mtime_ns", "current_file_hash", "expected_file_hash", "dry_run", "backup_path", "status", "decision", "category", "safer_alternative"}
+CORE_FIELDS = {"success", "error", "error_class", "error_type", "hint", "exit_code", "path", "note", "circuit_breaker", "warning", "total_lines", "truncated", "shown_lines", "bytes_written", "count", "backend", "ack_token", "approval_id", "expires_at", "risk", "mode", "session_id", "execution_mode", "allowed_roots", "read_id", "file_hash", "size", "mtime_ns", "current_file_hash", "expected_file_hash", "dry_run", "backup_path", "status", "decision", "category", "safer_alternative"}
 SUCCESS_FIELDS: dict[str, list[str]] = {
     "guardian_read_file": ["content"],
     "guardian_run_bash": ["stdout", "stderr"],

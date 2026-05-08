@@ -102,7 +102,16 @@ async def dispatch(session: SessionState, tool_name: str, params: dict, store: O
     elif tool_name == "guardian_glob":
         result = await execute_glob(params.get("pattern", ""), params.get("path"))
     else:
-        result = await execute_grep(params.get("pattern", ""), params.get("path"), params.get("include"))
+        result = await execute_grep(
+            params.get("pattern", ""),
+            params.get("path"),
+            params.get("include"),
+            params.get("exclude"),
+            int(params.get("context_lines", 0)),
+            bool(params.get("literal", False)),
+            bool(params.get("case_sensitive", True)),
+            int(params.get("max_matches", 100)),
+        )
 
     if requires_approval(result):
         result = await attach_pending_approval(store, session, tool_name, params, result)
