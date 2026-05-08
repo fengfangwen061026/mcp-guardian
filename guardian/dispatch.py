@@ -5,11 +5,12 @@ from .circuit import CircuitState, check_and_maybe_auto_unlock, force_half_open,
 from .handlers.edit_file import handle_edit_file
 from .handlers.glob_grep import execute_glob, execute_grep
 from .handlers.read_file import execute_read_file
-from .handlers.run_bash import execute_run_bash, get_adjusted_timeout, pre_validate_bash
+from .handlers.run_bash import execute_run_argv, execute_run_bash, get_adjusted_timeout, pre_validate_argv, pre_validate_bash
 from .handlers.write_file import execute_write_file
 from .intercept import detect_mode, precheck_call
 from .knowledge import KNOWLEDGE_BY_ERROR, KNOWLEDGE_BY_TOOL, get_static_guidance, select_guidance
 from .persist import OffsetStore
+from .roots import check_path_allowed, roots_status
 from .signature import extract_signature
 from .state import SessionState
 
@@ -51,7 +52,7 @@ async def dispatch(session: SessionState, tool_name: str, params: dict, store: O
 
     result: dict
     if tool_name == "guardian_run_bash":
-        fail = pre_validate_bash(params.get("command", ""), params.get("timeout", 30_000))
+        fail = _pre_validate_run_bash(params)
         if fail:
             await _record(session, store, tool_name, False, params_sig, fail)
             return enforce_budget(fail, tool_name)
@@ -73,8 +74,7 @@ async def dispatch(session: SessionState, tool_name: str, params: dict, store: O
     if tool_name == "guardian_edit_file":
         result = await handle_edit_file(params.get("path", ""), params.get("old_str", ""), params.get("new_str", ""))
     elif tool_name == "guardian_run_bash":
-        adjusted_timeout = get_adjusted_timeout(params["command"], params.get("timeout", 30_000))
-        result = await execute_run_bash(params["command"], params.get("cwd"), adjusted_timeout)
+        result = await _execute_run_bash(params)
     elif tool_name == "guardian_read_file":
         result = await execute_read_file(params.get("path", ""), params.get("start_line"), params.get("end_line"))
     elif tool_name == "guardian_write_file":
@@ -99,6 +99,31 @@ async def dispatch(session: SessionState, tool_name: str, params: dict, store: O
         if result.get("error_class") in {"MODEL_ERROR", "TRANSIENT", "ENV_ERROR"}:
             result["guidance"] = _get_static_guidance(tool_name, error_type, store, max_tokens=150 if mode.value != "PASSIVE" else 220)
     return enforce_budget(result, tool_name)
+
+
+def _pre_validate_run_bash(params: dict) -> dict | None:
+    has_command = "command" in params and params.get("command") is not None
+    has_argv = "argv" in params and params.get("argv") is not None
+    if has_command and has_argv:
+        return {"success": False, "error": "command 和 argv 只能二选一", "error_class": "MODEL_ERROR", "error_type": "ValidationError"}
+    if params.get("cwd"):
+        if violation := check_path_allowed(params["cwd"], "cwd"):
+            return violation
+    if has_argv:
+        argv = params.get("argv")
+        if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
+            return {"success": False, "error": "argv 必须是字符串数组", "error_class": "MODEL_ERROR", "error_type": "ValidationError"}
+        return pre_validate_argv(argv)
+    return pre_validate_bash(params.get("command", ""), params.get("timeout", 30_000))
+
+
+async def _execute_run_bash(params: dict) -> dict:
+    timeout = params.get("timeout", 30_000)
+    if "argv" in params and params.get("argv") is not None:
+        return await execute_run_argv(params["argv"], params.get("cwd"), timeout)
+    command = params["command"]
+    adjusted_timeout = get_adjusted_timeout(command, timeout)
+    return await execute_run_bash(command, params.get("cwd"), adjusted_timeout)
 
 
 async def _record(session: SessionState, store: OffsetStore, tool_name: str, success: bool, params_sig: str, result: dict) -> None:
@@ -150,4 +175,4 @@ async def handle_status(session: SessionState) -> dict:
             "consecutive_failures": state.consecutive_failures,
             "failure_signatures": len(state.failure_signatures),
         }
-    return {"success": True, "session_id": session.session_id, "mode": detect_mode(session).value, "tools": tools}
+    return {"success": True, "session_id": session.session_id, "mode": detect_mode(session).value, "tools": tools, "roots": roots_status()}

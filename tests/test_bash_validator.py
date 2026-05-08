@@ -1,6 +1,7 @@
 import pytest
 
-from guardian.handlers.run_bash import _is_interactive, get_adjusted_timeout, pre_validate_bash
+from guardian.handlers.run_bash import _check_bash_security, _is_interactive, get_adjusted_timeout, pre_validate_argv, pre_validate_bash
+from guardian.security import check_bash_security, is_interactive
 
 
 def test_interactive_detection():
@@ -23,3 +24,14 @@ def test_bash_blocks_dangerous_patterns():
 
 def test_long_running_timeout():
     assert get_adjusted_timeout("npm install", 30_000) >= 300_000
+
+
+def test_run_bash_aliases_use_canonical_security():
+    assert _is_interactive is is_interactive
+    assert _check_bash_security is check_bash_security
+
+
+def test_argv_validation_blocks_dangerous_executable():
+    assert pre_validate_argv(["sudo", "true"])["error_class"] == "SECURITY"
+    assert pre_validate_argv(["python3", "-c", "print(1)"]) is None
+    assert pre_validate_argv(["python3"])["error_type"] == "interactive_command"

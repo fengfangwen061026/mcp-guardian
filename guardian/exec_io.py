@@ -6,8 +6,31 @@ import re
 import tempfile
 from pathlib import Path
 
+from .roots import check_path_allowed
+
+
+def write_atomic(path: str, content: str) -> None:
+    if violation := check_path_allowed(path):
+        raise PermissionError(violation["error"])
+    abs_path = os.path.abspath(path)
+    dir_name = os.path.dirname(abs_path) or "."
+    os.makedirs(dir_name, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=dir_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp, abs_path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
 
 async def execute_read_file(path: str, start_line: int | None = None, end_line: int | None = None) -> dict:
+    if violation := check_path_allowed(path):
+        return violation
     try:
         with open(path, encoding="utf-8") as f:
             raw = f.read()
@@ -27,35 +50,13 @@ async def execute_read_file(path: str, start_line: int | None = None, end_line: 
     return {"success": True, "content": content, "total_lines": total, "shown_lines": f"{s + 1}-{e}", "truncated": (e - s) < total}
 
 
-async def execute_write_file(path: str, content: str) -> dict:
-    if content is None:
-        return {"success": False, "error": "content 不能为 null/undefined,创建空文件请传空字符串", "error_class": "MODEL_ERROR", "error_type": "ValidationError"}
-    try:
-        abs_path = os.path.abspath(path)
-        dir_name = os.path.dirname(abs_path) or "."
-        os.makedirs(dir_name, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=dir_name)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-            os.replace(tmp, abs_path)
-        except Exception:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
-    except PermissionError:
-        return {"success": False, "error": f"无写入权限:{path}", "error_class": "ENV_ERROR", "error_type": "PermissionError"}
-    except OSError as e:
-        return {"success": False, "error": f"写入失败:{e}", "error_class": "ENV_ERROR", "error_type": type(e).__name__}
-    return {"success": True, "path": path, "bytes_written": len(content.encode("utf-8"))}
-
 
 async def execute_glob(pattern: str, path: str | None = None) -> dict:
     if not pattern:
         return {"success": False, "error": "pattern 不能为空", "error_class": "MODEL_ERROR", "error_type": "ValidationError"}
     base = Path(path or ".").resolve()
+    if violation := check_path_allowed(base, "base path"):
+        return violation
     if not base.exists():
         return {"success": False, "error": f"搜索目录不存在:{base}", "error_class": "ENV_ERROR", "error_type": "FileNotFoundError"}
     try:
@@ -80,6 +81,8 @@ async def execute_grep(pattern: str, path: str | None = None, include: str | Non
     except re.error as e:
         return {"success": False, "error": f"正则编译失败:{e}", "error_class": "MODEL_ERROR", "error_type": "regex_error", "hint": "使用 Python re 兼容语法"}
     base = Path(path or ".").resolve()
+    if violation := check_path_allowed(base, "base path"):
+        return violation
     if not base.exists():
         return {"success": False, "error": f"搜索目录不存在:{base}", "error_class": "ENV_ERROR", "error_type": "FileNotFoundError"}
 

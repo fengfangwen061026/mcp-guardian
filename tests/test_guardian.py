@@ -130,7 +130,23 @@ async def test_bash_python_with_arg_ok(session, store, tmp_path):
     script.write_text("print('ok')\n")
     r = await dispatch(session, "guardian_run_bash", {"command": f"python3 {script}"}, store)
     assert r["success"]
+    assert r["execution_mode"] == "shell"
     assert "ok" in r["stdout"]
+
+
+@pytest.mark.asyncio
+async def test_bash_argv_mode_success(session, store):
+    r = await dispatch(session, "guardian_run_bash", {"argv": ["python3", "-c", "print('argv ok')"]}, store)
+    assert r["success"]
+    assert r["execution_mode"] == "argv"
+    assert "argv ok" in r["stdout"]
+
+
+@pytest.mark.asyncio
+async def test_bash_rejects_command_and_argv_together(session, store):
+    r = await dispatch(session, "guardian_run_bash", {"command": "echo x", "argv": ["echo", "x"]}, store)
+    assert not r["success"]
+    assert r["error_type"] == "ValidationError"
 
 
 @pytest.mark.asyncio

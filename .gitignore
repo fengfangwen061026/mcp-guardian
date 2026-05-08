@@ -13,7 +13,8 @@ results/
 __pycache__/
 *.py[cod]
 *.egg-info/
-dist/
+dist/*
+!dist/*.skill
 build/
 .venv/
 venv/

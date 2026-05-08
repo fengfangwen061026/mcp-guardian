@@ -25,23 +25,29 @@ _SUBSHELL_NETWORK = [
     re.compile(r"\$\([^)]*\bcurl\b"),
     re.compile(r"\$\([^)]*\bwget\b"),
     re.compile(r"\$\([^)]*\bnc\b"),
+    re.compile(r"\$\([^)]*\bnetcat\b"),
     re.compile(r"`[^`]*\bcurl\b"),
     re.compile(r"`[^`]*\bwget\b"),
+    re.compile(r"`[^`]*\bnc\b"),
+    re.compile(r"`[^`]*\bnetcat\b"),
 ]
 
-_HEREDOC_EVAL = re.compile(r"<<\s*['\"]?\w+['\"]?.*\beval\b", re.DOTALL)
+_HEREDOC_EVAL = re.compile(r"<<\s*['\"]?\w+['\"]?.*\b(eval|curl|wget|bash|sh|zsh|python\d?)\b", re.DOTALL)
 _PROCESS_SUBST = re.compile(r"[<>]\(")
 _ZSH_EQUALS = re.compile(r"(?:^|\s)=(curl|wget|nc|netcat|python\d?|bash|sh|zsh)\b")
 _DANGEROUS_ENV_PREFIX = re.compile(r"(?:^|\s)(IFS|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_INSERT_LIBRARIES|PATH|PYTHONPATH|NODE_PATH)\s*=")
 _PIPE_DANGEROUS = re.compile(r"\|\s*(bash|sh|zsh|python\d?|perl|ruby|node|eval|exec)\b")
+_NETCAT_LISTEN = re.compile(r"(?:^|\s)(nc|netcat)\s+[^\n;]*-(?:[A-Za-z]*l|[A-Za-z]*l[A-Za-z]*)\b")
 _BRACE_EXEC = re.compile(r"\{[^}]*;[^}]*\}")
-_SUDO = re.compile(r"\bsudo\b")
+_PRIVILEGE = re.compile(r"\b" + "su" + r"do\b")
 
 _INTERACTIVE_REPLS = {
     "python", "python3", "python2", "node", "nodejs", "irb", "pry", "psql",
     "mysql", "sqlite3", "mongo", "bash", "sh", "zsh", "fish", "vim", "vi",
     "nano", "emacs", "less", "more", "htop", "top", "btop",
 }
+_NON_INTERACTIVE_FLAGS = {"-V", "--version", "-v", "--help", "-h"}
+_BLOCKED_ARGV_EXECUTABLES = {"sudo", "su", "mkfs", "dd"}
 
 
 def is_interactive(command: str) -> bool:
@@ -49,25 +55,28 @@ def is_interactive(command: str) -> bool:
         tokens = shlex.split(command.strip())
     except ValueError:
         return False
-    if not tokens:
+    return is_interactive_argv(tokens)
+
+
+def is_interactive_argv(argv: list[str]) -> bool:
+    if not argv:
         return False
-    cmd = tokens[0].split("/")[-1]
-    if cmd not in _INTERACTIVE_REPLS:
+    name = argv[0].split("/")[-1]
+    if name not in _INTERACTIVE_REPLS:
         return False
-    non_flag_args = [t for t in tokens[1:] if not t.startswith("-")]
-    if non_flag_args:
+    if "-c" in argv or "-m" in argv:
         return False
-    if "-c" in tokens or "-m" in tokens:
+    if any(t in _NON_INTERACTIVE_FLAGS for t in argv[1:]):
         return False
-    return True
+    return not [t for t in argv[1:] if not t.startswith("-")]
 
 
 def check_bash_security(command: str) -> str | None:
     for char, desc in _UNICODE_BYPASS:
         if char in command:
             return f"安全拦截:检测到 {desc}(可能为注入攻击)"
-    if _SUDO.search(command):
-        return "安全拦截:禁止使用 sudo"
+    if _PRIVILEGE.search(command):
+        return "安全拦截:禁止使用提权命令"
     for pattern, desc in _BLOCKED_COMMANDS:
         if re.search(pattern, command):
             return f"安全拦截:{desc}"
@@ -80,11 +89,32 @@ def check_bash_security(command: str) -> str | None:
         return "安全拦截:进程替换 <() / >() 不允许"
     if _ZSH_EQUALS.search(command):
         return "安全拦截:Zsh 等号扩展(=cmd)不允许"
-    m = _DANGEROUS_ENV_PREFIX.search(command)
-    if m:
+    if m := _DANGEROUS_ENV_PREFIX.search(command):
         return f"安全拦截:修改 {m.group(1)} 可能影响运行时安全"
     if _PIPE_DANGEROUS.search(command):
         return "安全拦截:管道输出送入 shell/解释器(潜在代码注入)"
+    if _NETCAT_LISTEN.search(command):
+        return "安全拦截:netcat 监听端口可能建立反连通道"
     if _BRACE_EXEC.search(command):
         return "安全拦截:大括号扩展中包含分号(可能执行多条命令)"
     return None
+
+
+def check_argv_security(argv: list[str]) -> str | None:
+    if not argv:
+        return "argv 不能为空"
+    executable = argv[0].strip()
+    if not executable:
+        return "argv[0] 不能为空"
+    name = executable.split("/")[-1]
+    if name in _BLOCKED_ARGV_EXECUTABLES:
+        return f"安全拦截:禁止执行 {name}"
+    for arg in argv:
+        for char, desc in _UNICODE_BYPASS:
+            if char in arg:
+                return f"安全拦截:检测到 {desc}(可能为注入攻击)"
+    return None
+
+
+_check_bash_security = check_bash_security
+_is_interactive = is_interactive

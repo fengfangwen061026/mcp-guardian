@@ -10,9 +10,9 @@ from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import TextContent, Tool, ToolAnnotations
 
-from .dispatch import dispatch
+from .dispatch import TOOL_NAMES, dispatch
 from .persist import OffsetStore, flush_session
 from .state import SessionState
 
@@ -25,15 +25,135 @@ logging.basicConfig(
 )
 log = logging.getLogger("guardian")
 
+READ_ONLY_ANNOTATIONS = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+WRITE_FILE_ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+EDIT_FILE_ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
+RUN_BASH_ANNOTATIONS = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
+
+BASE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "success": {"type": "boolean", "description": "Whether the Guardian tool completed the requested operation."},
+        "error": {"type": "string", "description": "Human-readable error summary when success is false."},
+        "error_class": {"type": "string", "description": "Broad error category such as MODEL_ERROR, ENV_ERROR, SECURITY, or TRANSIENT."},
+        "error_type": {"type": "string", "description": "Specific machine-readable error type."},
+        "guidance": {"type": "array", "description": "Optional recovery guidance entries for the model.", "items": {"type": "object"}},
+    },
+    "required": ["success"],
+    "additionalProperties": True,
+}
+
+
+def _object_schema(properties: dict, required: list[str] | None = None, **extra: object) -> dict:
+    schema = {"type": "object", "properties": properties, "required": required or [], "additionalProperties": False}
+    schema.update(extra)
+    return schema
+
+
+def _tool(name: str, description: str, input_schema: dict, annotations: ToolAnnotations) -> Tool:
+    return Tool(name=name, description=description, inputSchema=input_schema, outputSchema=BASE_OUTPUT_SCHEMA, annotations=annotations)
+
+
 TOOL_DEFINITIONS = [
-    Tool(name="guardian_read_file", description="读取文件内容,返回带行号前缀的纯文本。", inputSchema={"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "end_line": {"type": "integer"}}, "required": ["path"]}),
-    Tool(name="guardian_write_file", description="创建或完全覆写文件。父目录不存在时自动创建。", inputSchema={"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}),
-    Tool(name="guardian_edit_file", description="精确字符串替换。old_str 必须从文件实际内容中精确复制。", inputSchema={"type": "object", "properties": {"path": {"type": "string"}, "old_str": {"type": "string"}, "new_str": {"type": "string"}, "_ack": {"type": "string"}}, "required": ["path", "old_str", "new_str"]}),
-    Tool(name="guardian_run_bash", description="执行 shell 命令,包含安全检查和超时控制。", inputSchema={"type": "object", "properties": {"command": {"type": "string"}, "cwd": {"type": "string"}, "timeout": {"type": "integer"}, "_ack": {"type": "string"}}, "required": ["command"]}),
-    Tool(name="guardian_glob", description="按 glob 模式搜索文件。", inputSchema={"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}}, "required": ["pattern"]}),
-    Tool(name="guardian_grep", description="在文件内容中搜索 Python 兼容正则。", inputSchema={"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}, "include": {"type": "string"}}, "required": ["pattern"]}),
-    Tool(name="guardian_get_spec", description="查询某个 guardian 工具的规范和最佳实践。", inputSchema={"type": "object", "properties": {"tool_name": {"type": "string"}, "error_history": {"type": "array", "items": {"type": "object"}}}, "required": ["tool_name"]}),
-    Tool(name="guardian_status", description="查看当前 Guardian session 的模式、熔断和计数状态。", inputSchema={"type": "object", "properties": {}}),
+    _tool(
+        "guardian_read_file",
+        "读取文件内容,返回带行号前缀的纯文本。",
+        _object_schema(
+            {
+                "path": {"type": "string", "minLength": 1, "description": "File path to read."},
+                "start_line": {"type": "integer", "minimum": 1, "description": "Optional 1-based first line to include."},
+                "end_line": {"type": "integer", "minimum": 1, "description": "Optional 1-based final line to include."},
+            },
+            ["path"],
+        ),
+        READ_ONLY_ANNOTATIONS,
+    ),
+    _tool(
+        "guardian_write_file",
+        "创建或完全覆写文件。父目录不存在时自动创建。",
+        _object_schema(
+            {
+                "path": {"type": "string", "minLength": 1, "description": "Target file path to create or fully overwrite."},
+                "content": {"type": "string", "description": "Complete UTF-8 file content to write; use an empty string for an empty file."},
+                "_ack": {"type": "string", "minLength": 1, "description": "Acknowledgement token required only after PRE_CHECK_REQUIRED."},
+            },
+            ["path", "content"],
+        ),
+        WRITE_FILE_ANNOTATIONS,
+    ),
+    _tool(
+        "guardian_edit_file",
+        "精确字符串替换。old_str 必须从文件实际内容中精确复制。",
+        _object_schema(
+            {
+                "path": {"type": "string", "minLength": 1, "description": "File path to edit."},
+                "old_str": {"type": "string", "minLength": 1, "description": "Exact existing text copied from the file without Guardian line prefixes."},
+                "new_str": {"type": "string", "description": "Replacement text."},
+                "_ack": {"type": "string", "minLength": 1, "description": "Acknowledgement token required only after PRE_CHECK_REQUIRED."},
+            },
+            ["path", "old_str", "new_str"],
+        ),
+        EDIT_FILE_ANNOTATIONS,
+    ),
+    _tool(
+        "guardian_run_bash",
+        "执行 shell 命令或 argv 命令,包含安全检查和超时控制。",
+        _object_schema(
+            {
+                "command": {"type": "string", "minLength": 1, "description": "Shell command string. Use only when shell features such as pipes or redirects are needed."},
+                "argv": {"type": "array", "minItems": 1, "description": "Safer argument-vector mode. Prefer this for user input or dynamic arguments.", "items": {"type": "string", "minLength": 1}},
+                "cwd": {"type": "string", "minLength": 1, "description": "Optional working directory for the command."},
+                "timeout": {"type": "integer", "minimum": 1, "maximum": 600000, "description": "Timeout in milliseconds."},
+                "_ack": {"type": "string", "minLength": 1, "description": "Acknowledgement token reserved for risky operations."},
+            },
+            [],
+            oneOf=[{"required": ["command"]}, {"required": ["argv"]}],
+        ),
+        RUN_BASH_ANNOTATIONS,
+    ),
+    _tool(
+        "guardian_glob",
+        "按 glob 模式搜索文件。",
+        _object_schema(
+            {
+                "pattern": {"type": "string", "minLength": 1, "description": "Glob pattern such as *.py or **/*.md."},
+                "path": {"type": "string", "minLength": 1, "description": "Optional base directory; defaults to current working directory."},
+            },
+            ["pattern"],
+        ),
+        READ_ONLY_ANNOTATIONS,
+    ),
+    _tool(
+        "guardian_grep",
+        "在文件内容中搜索 Python 兼容正则。",
+        _object_schema(
+            {
+                "pattern": {"type": "string", "minLength": 1, "description": "Python regular expression to search for."},
+                "path": {"type": "string", "minLength": 1, "description": "Optional base directory; defaults to current working directory."},
+                "include": {"type": "string", "minLength": 1, "description": "Optional filename glob filter such as *.py."},
+            },
+            ["pattern"],
+        ),
+        READ_ONLY_ANNOTATIONS,
+    ),
+    _tool(
+        "guardian_get_spec",
+        "查询某个 guardian 工具的规范和最佳实践。",
+        _object_schema(
+            {
+                "tool_name": {"type": "string", "enum": sorted(TOOL_NAMES), "description": "Guardian tool name to inspect and unlock."},
+                "error_history": {"type": "array", "description": "Optional recent errors for future clients; currently ignored.", "items": {"type": "object"}},
+            },
+            ["tool_name"],
+        ),
+        READ_ONLY_ANNOTATIONS,
+    ),
+    _tool(
+        "guardian_status",
+        "查看当前 Guardian session 的模式、熔断和计数状态。",
+        _object_schema({}),
+        READ_ONLY_ANNOTATIONS,
+    ),
 ]
 
 
@@ -59,7 +179,7 @@ class GuardianServer:
             return TOOL_DEFINITIONS
 
         @self.server.call_tool()
-        async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+        async def call_tool(name: str, arguments: dict) -> tuple[list[TextContent], dict]:
             session = self._get_or_create_session()
             log.info("tool call: %s args_keys=%s", name, list((arguments or {}).keys()))
             try:
@@ -67,7 +187,8 @@ class GuardianServer:
             except Exception as e:
                 log.exception("dispatch error in %s", name)
                 result = {"success": False, "error": f"Guardian 内部错误:{type(e).__name__}: {e}", "error_class": "TRANSIENT", "error_type": type(e).__name__}
-            return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+            content = [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+            return content, result
 
     async def run(self) -> None:
         try:

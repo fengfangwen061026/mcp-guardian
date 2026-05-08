@@ -19,16 +19,25 @@ dev = [
 
 [project.scripts]
 guardian-mcp = "guardian.server:main"
+guardian-install = "guardian.installer:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-timeout = 30
+markers = [
+    "timeout: per-test timeout when pytest-timeout is installed",
+    "stress: pressure tests that may take longer than normal",
+    "benchmark: performance baseline tests that are not strict pass/fail checks",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:pytest_asyncio",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["guardian"]
+artifacts = ["guardian/skills/**/*.md"]
+
+[tool.hatch.build.targets.sdist]
+include = ["guardian", "skills", "scripts", "tests", "README.md", "LICENSE", "pyproject.toml"]
 
 [build-system]
 requires = ["hatchling"]

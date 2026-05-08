@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import os
-import tempfile
+from ..exec_io import write_atomic
+from ..roots import check_path_allowed
 
 
 async def handle_edit_file(path: str, old_str: str, new_str: str) -> dict:
-    # Single file read keeps matching and preview based on the same snapshot.
     if not old_str:
         return {"success": False, "error": "old_str 不能为空", "error_class": "MODEL_ERROR", "error_type": "empty_old_str"}
+    if violation := check_path_allowed(path):
+        return violation
     try:
         with open(path, encoding="utf-8") as f:
             raw_content = f.read()
@@ -50,25 +51,8 @@ async def handle_edit_file(path: str, old_str: str, new_str: str) -> dict:
         return {"success": False, "error": f"old_str 匹配到 {match_count} 处,需更多上下文唯一定位", "error_class": "MODEL_ERROR", "error_type": "appears_multiple_times", "hint": "扩展 old_str,加入前后各 2-3 行代码直到唯一"}
 
     new_content = matched_content.replace(matched_old, new_str, 1)
-    _write_atomic(path, new_content)
+    write_atomic(path, new_content)
     result: dict = {"success": True, "path": path}
     if matched_old != old_str:
         result["note"] = "已自动归一化 CRLF→LF"
     return result
-
-
-def _write_atomic(path: str, content: str) -> None:
-    abs_path = os.path.abspath(path)
-    dir_name = os.path.dirname(abs_path) or "."
-    os.makedirs(dir_name, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=dir_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp, abs_path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
