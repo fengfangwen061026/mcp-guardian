@@ -120,10 +120,18 @@ def test_model_ack_is_bound_to_tool_and_params():
 
 
 def test_sanitize_params_redacts_secret_like_keys_and_text_fields():
-    params = sanitize_params({"api_key": "abc", "content": "secret", "command": "deploy token=abc", "nested": {"password": "p"}, "items": [{"token": "t"}]})
+    params = sanitize_params(
+        {
+            "api_key": "abc",
+            "content": "secret",
+            "command": "deploy token=abc TOKEN='quoted' password=\"quoted\" --token flag --password=flag2",
+            "nested": {"password": "p"},
+            "items": [{"token": "t"}],
+        }
+    )
 
     assert params["api_key"] == "[REDACTED]"
     assert params["content"] == "[REDACTED_TEXT length=6]"
-    assert params["command"] == "deploy token=[REDACTED]"
+    assert params["command"] == "deploy token=[REDACTED] TOKEN=[REDACTED] password=[REDACTED] --token=[REDACTED] --password=[REDACTED]"
     assert params["nested"]["password"] == "[REDACTED]"
     assert params["items"][0]["token"] == "[REDACTED]"

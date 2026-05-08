@@ -8,7 +8,8 @@ from typing import Any
 APPROVAL_TTL_SECONDS = 900
 _SECRET_KEY_PARTS = ("api_key", "apikey", "token", "secret", "password", "credential", "authorization")
 _LARGE_TEXT_KEYS = {"content", "old_str", "new_str"}
-_SECRET_ASSIGNMENT_RE = re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*[^\s,'\"]+")
+_SECRET_ASSIGNMENT_RE = re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*('[^']*'|\"[^\"]*\"|[^\s,'\"]+)")
+_SECRET_FLAG_RE = re.compile(r"(?i)(--(?:api[_-]?key|token|secret|password|authorization))(?:=([^\s]+)|\s+([^\s]+))")
 
 
 def requires_approval(result: dict | None) -> bool:
@@ -50,6 +51,7 @@ def _sanitize_value(key: str, value: Any) -> Any:
         return f"[REDACTED_TEXT length={len(value)}]"
     if isinstance(value, str):
         redacted = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", value)
+        redacted = _SECRET_FLAG_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", redacted)
         if len(redacted) > 1000:
             return redacted[:1000] + f"... [truncated {len(redacted) - 1000} chars]"
         return redacted
