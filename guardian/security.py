@@ -113,6 +113,26 @@ def check_argv_security(argv: list[str]) -> str | None:
         for char, desc in _UNICODE_BYPASS:
             if char in arg:
                 return f"安全拦截:检测到 {desc}(可能为注入攻击)"
+    if name in {"sh", "bash", "zsh"}:
+        shell_command = _shell_c_payload(argv)
+        if shell_command is not None:
+            return check_bash_security(shell_command)
+    return None
+
+
+def _shell_c_payload(argv: list[str]) -> str | None:
+    for index, arg in enumerate(argv[1:], start=1):
+        if arg == "--":
+            return None
+        if arg.startswith("--"):
+            continue
+        if not arg.startswith(("-", "+")):
+            continue
+        if "c" not in arg:
+            continue
+        if index + 1 >= len(argv):
+            return ""
+        return argv[index + 1]
     return None
 
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import fnmatch
 import shlex
 from dataclasses import dataclass
+
+from .policy_loader import load_policy
 
 
 @dataclass(frozen=True)
@@ -19,16 +22,16 @@ class BashDecision:
         return result
 
 
-def classify_command(command: str) -> BashDecision:
+def classify_command(command: str, policy_path: str | None = None) -> BashDecision:
     try:
         tokens = shlex.split(command)
     except ValueError:
         return BashDecision("ask", 0.6, ["命令无法安全解析"], "UNKNOWN")
-    return _classify(tokens, command)
+    return _classify(tokens, command, policy_path)
 
 
-def classify_argv(argv: list[str]) -> BashDecision:
-    return _classify(argv, " ".join(shlex.quote(part) for part in argv))
+def classify_argv(argv: list[str], policy_path: str | None = None) -> BashDecision:
+    return _classify(argv, " ".join(shlex.quote(part) for part in argv), policy_path)
 
 
 def needs_description(decision: BashDecision) -> bool:
@@ -42,21 +45,20 @@ def description_mismatch(description: str, decision: BashDecision) -> bool:
     return False
 
 
-def _classify(tokens: list[str], command_repr: str) -> BashDecision:
+def _classify(tokens: list[str], command_repr: str, policy_path: str | None = None) -> BashDecision:
     if not tokens:
         return BashDecision("ask", 0.5, ["空命令"], "UNKNOWN")
 
     executable = tokens[0].split("/")[-1]
     text = command_repr.lower()
 
-    if executable in {"sudo", "su"}:
-        return BashDecision("deny", 0.95, ["禁止提权命令"], "PRIVILEGED")
-    if "|" in tokens and _pipes_to_interpreter(tokens):
-        return BashDecision("deny", 0.95, ["网络或文本输出通过管道进入解释器"], "DESTRUCTIVE", "先下载到文件并人工审查内容。")
-    if ("curl" in tokens or "wget" in tokens) and any(part in {"bash", "sh", "zsh", "python", "python3", "node"} for part in tokens):
-        return BashDecision("deny", 0.95, ["下载内容可能被直接执行"], "DESTRUCTIVE", "先保存脚本并审查 diff。")
-    if executable == "docker" and ("--privileged" in tokens or "-v" in tokens and "/:/host" in tokens):
-        return BashDecision("deny", 0.9, ["Docker 容器获得宿主高权限或挂载根目录"], "PRIVILEGED")
+    hard_deny = _hard_deny(tokens)
+    if hard_deny is not None:
+        return hard_deny
+
+    policy_decision = _policy_decision(command_repr, policy_path)
+    if policy_decision is not None:
+        return policy_decision
 
     if executable == "git" and len(tokens) >= 2:
         sub = tokens[1]
@@ -81,6 +83,28 @@ def _classify(tokens: list[str], command_repr: str) -> BashDecision:
         return BashDecision("allow", 0.05, ["低风险只读/输出命令"], "SAFE_READONLY")
 
     return BashDecision("allow", 0.35, ["未命中高风险规则"], "UNKNOWN")
+
+
+def _hard_deny(tokens: list[str]) -> BashDecision | None:
+    executable = tokens[0].split("/")[-1]
+    if executable in {"sudo", "su"}:
+        return BashDecision("deny", 0.95, ["禁止提权命令"], "PRIVILEGED")
+    if "|" in tokens and _pipes_to_interpreter(tokens):
+        return BashDecision("deny", 0.95, ["网络或文本输出通过管道进入解释器"], "DESTRUCTIVE", "先下载到文件并人工审查内容。")
+    if ("curl" in tokens or "wget" in tokens) and any(part in {"bash", "sh", "zsh", "python", "python3", "node"} for part in tokens):
+        return BashDecision("deny", 0.95, ["下载内容可能被直接执行"], "DESTRUCTIVE", "先保存脚本并审查 diff。")
+    if executable == "docker" and ("--privileged" in tokens or "-v" in tokens and "/:/host" in tokens):
+        return BashDecision("deny", 0.9, ["Docker 容器获得宿主高权限或挂载根目录"], "PRIVILEGED")
+    return None
+
+
+def _policy_decision(command_repr: str, policy_path: str | None = None) -> BashDecision | None:
+    policy = load_policy(policy_path)
+    for rule in policy.bash_rules:
+        if not any(fnmatch.fnmatch(command_repr, pattern) for pattern in rule.patterns):
+            continue
+        return BashDecision(rule.decision, rule.risk, list(rule.reasons) or [f"项目 bash policy {rule.decision}"], rule.category, rule.safer_alternative)
+    return None
 
 
 def _pipes_to_interpreter(tokens: list[str]) -> bool:

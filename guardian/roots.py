@@ -1,25 +1,27 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
+from .policy_loader import PolicyConfigError, load_policy, policy_error
 
-def configured_roots() -> list[Path]:
-    raw = os.environ.get("GUARDIAN_ROOTS") or os.environ.get("GUARDIAN_ROOT", "")
-    roots = []
-    for item in raw.split(os.pathsep):
-        if item.strip():
-            roots.append(Path(item).expanduser().resolve())
-    return roots
+
+def configured_roots(start_path: str | Path | None = None) -> list[Path]:
+    return list(load_policy(start_path).roots)
 
 
 def roots_status() -> dict:
-    roots = configured_roots()
+    try:
+        roots = configured_roots()
+    except PolicyConfigError as exc:
+        return {"enabled": False, "allowed_roots": [], "policy_error": str(exc)}
     return {"enabled": bool(roots), "allowed_roots": [str(root) for root in roots]}
 
 
 def check_path_allowed(path: str | Path, label: str = "path") -> dict | None:
-    roots = configured_roots()
+    try:
+        roots = configured_roots(path)
+    except PolicyConfigError as exc:
+        return policy_error(exc)
     if not roots:
         return None
     try:

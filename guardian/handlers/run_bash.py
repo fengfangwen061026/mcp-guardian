@@ -5,6 +5,7 @@ import os
 import shlex
 
 from ..bash_classifier import classify_argv, classify_command, description_mismatch, needs_description
+from ..policy_loader import PolicyConfigError, policy_error
 from ..security import check_argv_security, check_bash_security, is_interactive, is_interactive_argv
 
 _LONG_RUNNING = {
@@ -40,24 +41,32 @@ def get_adjusted_timeout(command: str, requested: int) -> int:
     return requested
 
 
-def pre_validate_bash(command: str, timeout: int = 30_000, description: str | None = None) -> dict | None:
+def pre_validate_bash(command: str, timeout: int = 30_000, description: str | None = None, policy_path: str | None = None) -> dict | None:
     blocked = check_bash_security(command)
     if blocked:
         return {"success": False, "error": blocked, "error_class": "SECURITY", "error_type": "SecurityError"}
     if is_interactive(command):
         cmd_name = shlex.split(command.strip())[0].split("/")[-1]
         return {"success": False, "error": f"{cmd_name} 无参数时进入交互模式,无法在非 TTY 环境执行", "error_class": "MODEL_ERROR", "error_type": "interactive_command", "hint": f"替代:{cmd_name} -c '代码'(单次执行),或将代码写入文件后执行"}
-    return _policy_result(classify_command(command), description)
+    try:
+        decision = classify_command(command, policy_path)
+    except PolicyConfigError as exc:
+        return policy_error(exc)
+    return _policy_result(decision, description)
 
 
-def pre_validate_argv(argv: list[str], description: str | None = None) -> dict | None:
+def pre_validate_argv(argv: list[str], description: str | None = None, policy_path: str | None = None) -> dict | None:
     blocked = check_argv_security(argv)
     if blocked:
         return {"success": False, "error": blocked, "error_class": "SECURITY", "error_type": "SecurityError"}
     if is_interactive_argv(argv):
         cmd_name = argv[0].split("/")[-1]
         return {"success": False, "error": f"{cmd_name} 无参数时进入交互模式,无法在非 TTY 环境执行", "error_class": "MODEL_ERROR", "error_type": "interactive_command", "hint": f"替代:{cmd_name} -c '代码'(单次执行),或将代码写入文件后执行"}
-    return _policy_result(classify_argv(argv), description)
+    try:
+        decision = classify_argv(argv, policy_path)
+    except PolicyConfigError as exc:
+        return policy_error(exc)
+    return _policy_result(decision, description)
 
 
 def _policy_result(decision, description: str | None) -> dict | None:

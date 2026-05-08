@@ -132,12 +132,13 @@ def _pre_validate_run_bash(params: dict) -> dict | None:
     if params.get("cwd"):
         if violation := check_path_allowed(params["cwd"], "cwd"):
             return violation
+    policy_path = params.get("cwd")
     if has_argv:
         argv = params.get("argv")
         if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
             return {"success": False, "error": "argv 必须是字符串数组", "error_class": "MODEL_ERROR", "error_type": "ValidationError"}
-        return pre_validate_argv(argv, params.get("description"))
-    return pre_validate_bash(params.get("command", ""), params.get("timeout", 30_000), params.get("description"))
+        return pre_validate_argv(argv, params.get("description"), policy_path)
+    return pre_validate_bash(params.get("command", ""), params.get("timeout", 30_000), params.get("description"), policy_path)
 
 
 async def _execute_run_bash(params: dict) -> dict:
