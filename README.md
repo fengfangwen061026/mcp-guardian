@@ -340,8 +340,25 @@ npx @modelcontextprotocol/inspector .venv/bin/guardian-mcp
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `GUARDIAN_MODEL_HINT` | `_default` | 给 session 标记模型来源，便于后续统计与策略扩展 |
-| `GUARDIAN_ROOTS` | 未启用 | 用 `:` 分隔允许访问的根目录，启用后文件、搜索和 bash `cwd` 必须位于这些目录内 |
+| `GUARDIAN_ROOTS` | 安装时默认为项目根目录 | 用 `:` 分隔允许访问的根目录，启用后文件、搜索和 bash `cwd` 必须位于这些目录内 |
 | `GUARDIAN_ROOT` | 未启用 | 单根目录简写；当 `GUARDIAN_ROOTS` 未设置时生效 |
+| `GUARDIAN_REQUIRE_READ_FOR_EDIT` | `1` | 默认要求 edit 提供 `expected_read_id` 或 `expected_file_hash`；设为 `0` 可临时兼容旧流程 |
+
+安装脚本和 `guardian-install` 默认会写入 `GUARDIAN_ROOTS`，如需显式关闭可使用 `guardian-install --no-roots`：
+
+```json
+{
+  "mcpServers": {
+    "guardian": {
+      "command": "/absolute/path/to/mcp-guardian/.venv/bin/guardian-mcp",
+      "env": {
+        "GUARDIAN_MODEL_HINT": "_default",
+        "GUARDIAN_ROOTS": "/absolute/path/to/project"
+      }
+    }
+  }
+}
+```
 
 Roots 限制不是 OS sandbox。它会限制 Guardian 自己处理的 path 和 bash `cwd`，但 shell 命令内部仍可能访问绝对路径；需要强隔离时应使用容器、chroot、seccomp 等系统级沙箱。
 
@@ -360,13 +377,41 @@ MCP Guardian 适合：
 - 依赖交互式终端会话的任务
 - 把 MCP 当作远程常驻 HTTP 服务使用的场景
 
-## 已知限制
+## 当前限制与升级方向
 
-- Guardian 是 stdio MCP 服务，不提供 HTTP API。
-- 它不能阻止用户或其他工具直接调用系统命令。
-- 它不会修改 Claude Code 原生工具，只提供额外的 `guardian_*` 工具。
+当前版本已经可用，但仍是 MVP / 初始安全包装层，不应把它当成完整沙箱或高自治 Agent 的最终安全边界。
+
+已完成的 P0 安全闭环：
+
+- 默认安装写入 `GUARDIAN_ROOTS`，`guardian-install --no-roots` 可显式关闭。
+- `guardian_read_file` 返回 `read_id`、`file_hash`、`size`、`mtime_ns`。
+- `guardian_edit_file` 默认要求 `expected_read_id` 或 `expected_file_hash`，并能发现 read 后文件变化。
+- `guardian_write_file` 默认 `create_only`；覆盖/追加已有文件必须提供 hash，支持 `dry_run diff` 和 backup。
+- 已修复 `guardian_run_bash` 的 `argv` 熔断签名。
+- 已内置基础 sensitive path policy：`.env`/`.npmrc`/`credentials.json` ask，私钥/证书/Git 凭据 deny。
+- 已内置基础 Bash classifier：安全开发命令 allow，破坏性 Git/文件操作 ask，高危提权、下载即执行、宿主根挂载 deny。
+
+仍然存在的限制：
+
+- `PRE_CHECK_REQUIRED` 的 `_ack` 仍是模型可回传的确认 token，不等同于真正人工审批。
+- Bash policy 不是系统级 sandbox，只是命令前分类与阻断。
+- `guardian_grep` 是 Python fallback 级搜索，尚未优先使用 ripgrep，也不支持完整 context / exclude / literal / max_matches。
 - 熔断状态是 session 级别；Claude Code 重启 MCP 后会开启新 session。
-- 安全检查无法证明命令“绝对安全”，只能降低常见误操作和高风险模式。
+
+下一轮开发优先级：
+
+| 阶段 | 目标 | 关键内容 |
+| --- | --- | --- |
+| Phase 1 | 已完成 | 安装默认写入 `GUARDIAN_ROOTS`，新增 `--no-roots`，补 symlink escape 测试 |
+| Phase 2 | 已完成 | `read_id` / `file_hash`，edit 校验 `expected_read_id` / `expected_file_hash` |
+| Phase 3 | 已完成 | `mode=create_only/overwrite/append`，`dry_run diff`，`expected_file_hash`，默认 backup |
+| Phase 4 | 已完成基础版 | `sensitive.py`，`bash_classifier.py`，allow / ask / deny，危险命令 safer alternative |
+| Phase 5 | 待开发 | 区分 `MODEL_ACK_REQUIRED` 和 `APPROVAL_REQUIRED`，记录 pending approvals |
+| Phase 6 | 待开发 | ripgrep backend、Git 只读/preview 工具、diff/multi-edit/apply-patch、项目级 policy |
+
+下一轮建议优先做真正审批流和策略配置，而不是继续扩大工具数量。
+
+详细实施总纲见工作室根目录：`../MCP Guardian 最终实施文档.md`。
 
 ## License
 

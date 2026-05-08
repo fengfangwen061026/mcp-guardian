@@ -811,10 +811,10 @@ class TestDispatchPipeline:
             f = tmp_path / f"file_{i}.py"
 
             # Read
-            result = await dispatch(sess, "guardian_read_file",
-                                    {"path": str(f)}, db)
+            read_result = await dispatch(sess, "guardian_read_file",
+                                         {"path": str(f)}, db)
             total += 1
-            if result.get("success"):
+            if read_result.get("success"):
                 successes += 1
 
             # Edit
@@ -822,6 +822,7 @@ class TestDispatchPipeline:
                 "path": str(f),
                 "old_str": f"def func_{i}():",
                 "new_str": f"def func_{i}_v2():",
+                "expected_read_id": read_result.get("read_id", ""),
             }, db)
             total += 1
             if result.get("success"):

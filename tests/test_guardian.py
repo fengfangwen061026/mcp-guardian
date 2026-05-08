@@ -11,6 +11,11 @@ def session():
     return SessionState(session_id="test_session", model_hint="_default")
 
 
+@pytest.fixture(autouse=True)
+def legacy_edit_mode(monkeypatch):
+    monkeypatch.setenv("GUARDIAN_REQUIRE_READ_FOR_EDIT", "0")
+
+
 @pytest.fixture
 def store(tmp_path):
     return OffsetStore(tmp_path / "test_offsets.db")

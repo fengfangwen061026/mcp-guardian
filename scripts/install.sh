@@ -26,7 +26,8 @@ cat > "$MCP_CONFIG" <<JSON
     "guardian": {
       "command": "$VENV_DIR/bin/guardian-mcp",
       "env": {
-        "GUARDIAN_MODEL_HINT": "_default"
+        "GUARDIAN_MODEL_HINT": "_default",
+        "GUARDIAN_ROOTS": "$ROOT_DIR"
       }
     }
   }

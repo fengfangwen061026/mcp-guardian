@@ -14,5 +14,17 @@ def test_signature_stable_and_distinct():
 def test_bash_signature_six_dimensions():
     sig = extract_signature("guardian_run_bash", {"command": "echo hi | wc -c"})
     assert len(sig.split(":")) >= 6
+    assert "mode=command" in sig
     assert "has_pipe=True" in sig
     assert ":sig=" in sig
+
+
+def test_bash_argv_signature_distinguishes_modes_and_values():
+    command_sig = extract_signature("guardian_run_bash", {"command": "python3 -c 'print(1)'"})
+    argv_sig = extract_signature("guardian_run_bash", {"argv": ["python3", "-c", "print(1)"]})
+    other_argv_sig = extract_signature("guardian_run_bash", {"argv": ["python3", "-c", "print(2)"]})
+
+    assert "mode=argv" in argv_sig
+    assert command_sig != argv_sig
+    assert argv_sig != other_argv_sig
+    assert argv_sig == extract_signature("guardian_run_bash", {"argv": ["python3", "-c", "print(1)"]})

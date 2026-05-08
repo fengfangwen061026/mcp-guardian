@@ -1,14 +1,28 @@
 from __future__ import annotations
 
+from ..file_version import invalidate_path_reads, validate_edit_precondition
 from ..exec_io import write_atomic
 from ..roots import check_path_allowed
+from ..sensitive import check_sensitive_path
+from ..state import SessionState
 
 
-async def handle_edit_file(path: str, old_str: str, new_str: str) -> dict:
+async def handle_edit_file(
+    session: SessionState | None,
+    path: str,
+    old_str: str,
+    new_str: str,
+    expected_read_id: str | None = None,
+    expected_file_hash: str | None = None,
+) -> dict:
     if not old_str:
         return {"success": False, "error": "old_str 不能为空", "error_class": "MODEL_ERROR", "error_type": "empty_old_str"}
     if violation := check_path_allowed(path):
         return violation
+    if sensitive := check_sensitive_path(path, "edit"):
+        return sensitive
+    if precondition := validate_edit_precondition(session, path, expected_read_id, expected_file_hash):
+        return precondition
     try:
         with open(path, encoding="utf-8") as f:
             raw_content = f.read()
@@ -52,6 +66,7 @@ async def handle_edit_file(path: str, old_str: str, new_str: str) -> dict:
 
     new_content = matched_content.replace(matched_old, new_str, 1)
     write_atomic(path, new_content)
+    invalidate_path_reads(session, path)
     result: dict = {"success": True, "path": path}
     if matched_old != old_str:
         result["note"] = "已自动归一化 CRLF→LF"

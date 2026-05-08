@@ -6,7 +6,9 @@ import re
 import tempfile
 from pathlib import Path
 
+from .file_version import snapshot_file
 from .roots import check_path_allowed
+from .sensitive import check_sensitive_path
 
 
 def write_atomic(path: str, content: str) -> None:
@@ -31,9 +33,12 @@ def write_atomic(path: str, content: str) -> None:
 async def execute_read_file(path: str, start_line: int | None = None, end_line: int | None = None) -> dict:
     if violation := check_path_allowed(path):
         return violation
+    if sensitive := check_sensitive_path(path, "read"):
+        return sensitive
     try:
         with open(path, encoding="utf-8") as f:
             raw = f.read()
+        snapshot = snapshot_file(path)
     except FileNotFoundError:
         return {"success": False, "error": f"文件不存在:{path}", "error_class": "ENV_ERROR", "error_type": "FileNotFoundError", "hint": "先用 guardian_glob 确认路径"}
     except UnicodeDecodeError:
@@ -47,7 +52,7 @@ async def execute_read_file(path: str, start_line: int | None = None, end_line: 
     e = min(total, end_line if end_line else total)
     selected = lines[s:e]
     content = "\n".join(f"{s + i + 1}: {l}" for i, l in enumerate(selected))
-    return {"success": True, "content": content, "total_lines": total, "shown_lines": f"{s + 1}-{e}", "truncated": (e - s) < total}
+    return {"success": True, "content": content, "total_lines": total, "shown_lines": f"{s + 1}-{e}", "truncated": (e - s) < total, **snapshot}
 
 
 

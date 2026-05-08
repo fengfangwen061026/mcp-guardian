@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import inspect
+
 from .budget import enforce_budget
 from .circuit import CircuitState, check_and_maybe_auto_unlock, force_half_open, record_result
 from .handlers.edit_file import handle_edit_file
 from .handlers.glob_grep import execute_glob, execute_grep
 from .handlers.read_file import execute_read_file
 from .handlers.run_bash import execute_run_argv, execute_run_bash, get_adjusted_timeout, pre_validate_argv, pre_validate_bash
+from .file_version import remember_read
 from .handlers.write_file import execute_write_file
 from .intercept import detect_mode, precheck_call
 from .knowledge import KNOWLEDGE_BY_ERROR, KNOWLEDGE_BY_TOOL, get_static_guidance, select_guidance
@@ -29,7 +32,14 @@ TOOL_NAMES = {
 
 def _make_offset_lookup(store: OffsetStore):
     def lookup(entry_id: str) -> float:
-        return store.get_offset(entry_id)
+        try:
+            value = store.get_offset(entry_id)
+            if inspect.isawaitable(value):
+                value.close()
+                return 0.0
+            return float(value)
+        except Exception:
+            return 0.0
     return lookup
 
 
@@ -72,13 +82,15 @@ async def dispatch(session: SessionState, tool_name: str, params: dict, store: O
         circuit = CircuitState.CLOSED
 
     if tool_name == "guardian_edit_file":
-        result = await handle_edit_file(params.get("path", ""), params.get("old_str", ""), params.get("new_str", ""))
+        result = await handle_edit_file(session, params.get("path", ""), params.get("old_str", ""), params.get("new_str", ""), params.get("expected_read_id"), params.get("expected_file_hash"))
     elif tool_name == "guardian_run_bash":
         result = await _execute_run_bash(params)
     elif tool_name == "guardian_read_file":
         result = await execute_read_file(params.get("path", ""), params.get("start_line"), params.get("end_line"))
+        if result.get("success"):
+            result["read_id"] = remember_read(session, params.get("path", ""), result["file_hash"], result["size"], result["mtime_ns"])
     elif tool_name == "guardian_write_file":
-        result = await execute_write_file(params.get("path", ""), params.get("content", ""))
+        result = await execute_write_file(params.get("path", ""), params.get("content", ""), params.get("mode", "create_only"), params.get("expected_file_hash"), bool(params.get("dry_run", False)), bool(params.get("backup", True)))
     elif tool_name == "guardian_glob":
         result = await execute_glob(params.get("pattern", ""), params.get("path"))
     else:
@@ -113,8 +125,8 @@ def _pre_validate_run_bash(params: dict) -> dict | None:
         argv = params.get("argv")
         if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
             return {"success": False, "error": "argv 必须是字符串数组", "error_class": "MODEL_ERROR", "error_type": "ValidationError"}
-        return pre_validate_argv(argv)
-    return pre_validate_bash(params.get("command", ""), params.get("timeout", 30_000))
+        return pre_validate_argv(argv, params.get("description"))
+    return pre_validate_bash(params.get("command", ""), params.get("timeout", 30_000), params.get("description"))
 
 
 async def _execute_run_bash(params: dict) -> dict:

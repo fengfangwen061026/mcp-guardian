@@ -6,7 +6,7 @@ BUDGET: dict[tuple, int] = {
     ("guardian_read_file", True): 2000,
     ("guardian_run_bash", True): 700,
     ("guardian_edit_file", True): 80,
-    ("guardian_write_file", True): 80,
+    ("guardian_write_file", True): 400,
     ("guardian_glob", True): 500,
     ("guardian_grep", True): 600,
     ("guardian_get_spec", True): 800,
@@ -19,12 +19,12 @@ BUDGET: dict[tuple, int] = {
     ("_any", "hard_blocked"): 300,
 }
 
-CORE_FIELDS = {"success", "error", "error_class", "error_type", "hint", "exit_code", "path", "note", "circuit_breaker", "warning", "total_lines", "truncated", "shown_lines", "bytes_written", "count", "ack_token", "risk", "mode", "session_id", "execution_mode", "allowed_roots"}
+CORE_FIELDS = {"success", "error", "error_class", "error_type", "hint", "exit_code", "path", "note", "circuit_breaker", "warning", "total_lines", "truncated", "shown_lines", "bytes_written", "count", "ack_token", "risk", "mode", "session_id", "execution_mode", "allowed_roots", "read_id", "file_hash", "size", "mtime_ns", "current_file_hash", "expected_file_hash", "dry_run", "backup_path", "status", "decision", "category", "safer_alternative"}
 SUCCESS_FIELDS: dict[str, list[str]] = {
     "guardian_read_file": ["content"],
     "guardian_run_bash": ["stdout", "stderr"],
     "guardian_edit_file": [],
-    "guardian_write_file": [],
+    "guardian_write_file": ["diff"],
     "guardian_glob": ["matches", "truncated_results"],
     "guardian_grep": ["matches", "truncated_results"],
     "guardian_get_spec": ["spec"],

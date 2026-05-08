@@ -31,11 +31,25 @@ def extract_signature(tool_name: str, params: dict) -> str:
         )
 
     if tool_name == "guardian_run_bash":
+        if params.get("argv") is not None:
+            argv = params.get("argv") or []
+            cmd_repr = "\0".join(argv)
+            prefix = argv[0] if argv else ""
+            return (
+                "mode=argv"
+                f":cmd={prefix}"
+                f":argc={_bucket(len(argv), [1, 3, 8, 20])}"
+                f":has_pipe={False}"
+                f":has_redirect={False}"
+                f":has_semicolon={False}"
+                f":sig={_stable_hash(cmd_repr)}"
+            )
         cmd = params.get("command", "") or ""
         tokens = cmd.split()
         prefix = tokens[0] if tokens else ""
         return (
-            f"cmd={prefix}"
+            "mode=command"
+            f":cmd={prefix}"
             f":token_count={_bucket(len(tokens), [1, 3, 8, 20])}"
             f":has_pipe={'|' in cmd}"
             f":has_redirect={'>' in cmd or '>>' in cmd}"

@@ -4,6 +4,7 @@ import asyncio
 import os
 import shlex
 
+from ..bash_classifier import classify_argv, classify_command, description_mismatch, needs_description
 from ..security import check_argv_security, check_bash_security, is_interactive, is_interactive_argv
 
 _LONG_RUNNING = {
@@ -39,24 +40,37 @@ def get_adjusted_timeout(command: str, requested: int) -> int:
     return requested
 
 
-def pre_validate_bash(command: str, timeout: int = 30_000) -> dict | None:
+def pre_validate_bash(command: str, timeout: int = 30_000, description: str | None = None) -> dict | None:
     blocked = check_bash_security(command)
     if blocked:
         return {"success": False, "error": blocked, "error_class": "SECURITY", "error_type": "SecurityError"}
     if is_interactive(command):
         cmd_name = shlex.split(command.strip())[0].split("/")[-1]
         return {"success": False, "error": f"{cmd_name} 无参数时进入交互模式,无法在非 TTY 环境执行", "error_class": "MODEL_ERROR", "error_type": "interactive_command", "hint": f"替代:{cmd_name} -c '代码'(单次执行),或将代码写入文件后执行"}
-    return None
+    return _policy_result(classify_command(command), description)
 
 
-def pre_validate_argv(argv: list[str]) -> dict | None:
+def pre_validate_argv(argv: list[str], description: str | None = None) -> dict | None:
     blocked = check_argv_security(argv)
     if blocked:
         return {"success": False, "error": blocked, "error_class": "SECURITY", "error_type": "SecurityError"}
     if is_interactive_argv(argv):
         cmd_name = argv[0].split("/")[-1]
         return {"success": False, "error": f"{cmd_name} 无参数时进入交互模式,无法在非 TTY 环境执行", "error_class": "MODEL_ERROR", "error_type": "interactive_command", "hint": f"替代:{cmd_name} -c '代码'(单次执行),或将代码写入文件后执行"}
-    return None
+    return _policy_result(classify_argv(argv), description)
+
+
+def _policy_result(decision, description: str | None) -> dict | None:
+    if decision.decision == "allow":
+        return None
+    payload = decision.to_dict()
+    if decision.decision == "deny":
+        return {"success": False, "error": ";".join(decision.reasons), "error_class": "SECURITY", "error_type": "BashPolicyDenied", **payload}
+    if needs_description(decision) and not description:
+        return {"success": False, "error": "高风险命令必须提供 description", "error_class": "MODEL_ERROR", "error_type": "description_required", **payload}
+    if description and description_mismatch(description, decision):
+        return {"success": False, "error": "description 与命令风险明显不符", "error_class": "MODEL_ERROR", "error_type": "DescriptionMismatch", **payload}
+    return {"success": False, "status": "APPROVAL_REQUIRED", "error": "命令需要审批", "error_class": "SECURITY", "error_type": "BashPolicyApprovalRequired", **payload}
 
 
 def truncate_output(text: str, max_chars: int = 3000) -> str:

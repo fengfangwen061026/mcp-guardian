@@ -70,6 +70,22 @@ async def test_roots_block_bash_cwd_outside(monkeypatch, session, store, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_roots_block_symlink_escape(monkeypatch, session, store, tmp_path):
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside.txt"
+    allowed.mkdir()
+    outside.write_text("no", encoding="utf-8")
+    link = allowed / "escape.txt"
+    link.symlink_to(outside)
+    monkeypatch.setenv("GUARDIAN_ROOTS", str(allowed))
+
+    result = await dispatch(session, "guardian_read_file", {"path": str(link)}, store)
+
+    assert result["success"] is False
+    assert result["error_type"] == "PathOutsideRoot"
+
+
+@pytest.mark.asyncio
 async def test_status_reports_roots(monkeypatch, session, store, tmp_path):
     monkeypatch.setenv("GUARDIAN_ROOT", str(tmp_path))
 

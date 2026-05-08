@@ -15,6 +15,7 @@ def main() -> None:
     parser.add_argument("--command", default=None, help="guardian-mcp command path to write into .mcp.json.")
     parser.add_argument("--model-hint", default="_default", help="GUARDIAN_MODEL_HINT value.")
     parser.add_argument("--roots", default=None, help="Optional GUARDIAN_ROOTS value to add to MCP env.")
+    parser.add_argument("--no-roots", action="store_true", help="Do not write GUARDIAN_ROOTS into .mcp.json.")
     args = parser.parse_args()
 
     project_dir = Path(args.project).expanduser().resolve()
@@ -24,8 +25,9 @@ def main() -> None:
     skills_dir.mkdir(parents=True, exist_ok=True)
 
     command = args.command or _resolve_guardian_mcp()
+    roots = None if args.no_roots else (args.roots or str(project_dir))
     _install_skill(skills_dir)
-    _write_mcp_config(project_dir / ".mcp.json", command, args.model_hint, args.roots)
+    _write_mcp_config(project_dir / ".mcp.json", command, args.model_hint, roots)
 
     print(f"MCP config written to: {project_dir / '.mcp.json'}")
     print(f"Skill installed to: {skills_dir / 'guardian-mcp'}")
