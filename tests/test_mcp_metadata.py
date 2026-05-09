@@ -4,7 +4,7 @@ from mcp.types import CallToolRequest, TextContent
 
 from guardian.dispatch import TOOL_NAMES, dispatch
 from guardian.persist import OffsetStore
-from guardian.server import TOOL_DEFINITIONS, GuardianServer
+from guardian.server import BASE_OUTPUT_SCHEMA, TOOL_DEFINITIONS, GuardianServer
 from guardian.state import SessionState
 
 
@@ -31,15 +31,23 @@ def test_get_spec_enum_covers_all_tools():
     assert set(enum) == TOOL_NAMES
 
 
+def test_tool_schemas_use_claude_code_safe_subset():
+    for tool in TOOL_DEFINITIONS:
+        dumped = tool.model_dump(exclude_none=True)
+        assert "outputSchema" not in dumped
+        assert "oneOf" not in tool.inputSchema
+        assert "anyOf" not in tool.inputSchema
+        assert "allOf" not in tool.inputSchema
+
+
 @pytest.mark.asyncio
-async def test_dispatch_output_satisfies_tool_output_schema(tmp_path):
+async def test_dispatch_output_satisfies_structured_result_schema(tmp_path):
     session = SessionState(session_id="schema_test")
     store = OffsetStore(tmp_path / "events.db")
-    status_tool = next(tool for tool in TOOL_DEFINITIONS if tool.name == "guardian_status")
 
     result = await dispatch(session, "guardian_status", {}, store)
 
-    jsonschema.validate(instance=result, schema=status_tool.outputSchema)
+    jsonschema.validate(instance=result, schema=BASE_OUTPUT_SCHEMA)
 
 
 @pytest.mark.asyncio

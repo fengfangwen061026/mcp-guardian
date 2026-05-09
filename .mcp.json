@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "guardian": {
-      "command": "guardian-mcp",
+      "command": ".venv/bin/guardian-mcp",
       "env": {
         "GUARDIAN_MODEL_HINT": "_default"
       }

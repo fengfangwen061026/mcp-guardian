@@ -51,7 +51,7 @@ def _object_schema(properties: dict, required: list[str] | None = None, **extra:
 
 
 def _tool(name: str, description: str, input_schema: dict, annotations: ToolAnnotations) -> Tool:
-    return Tool(name=name, description=description, inputSchema=input_schema, outputSchema=BASE_OUTPUT_SCHEMA, annotations=annotations)
+    return Tool(name=name, description=description, inputSchema=input_schema, annotations=annotations)
 
 
 TOOL_DEFINITIONS = [
@@ -106,15 +106,14 @@ TOOL_DEFINITIONS = [
         "执行 shell 命令或 argv 命令,包含安全检查和超时控制。",
         _object_schema(
             {
-                "command": {"type": "string", "minLength": 1, "description": "Shell command string. Use only when shell features such as pipes or redirects are needed."},
-                "argv": {"type": "array", "minItems": 1, "description": "Safer argument-vector mode. Prefer this for user input or dynamic arguments.", "items": {"type": "string", "minLength": 1}},
+                "command": {"type": "string", "minLength": 1, "description": "Shell command string. Provide either command or argv, not both. Use only when shell features such as pipes or redirects are needed."},
+                "argv": {"type": "array", "minItems": 1, "description": "Safer argument-vector mode. Provide either argv or command, not both. Prefer this for user input or dynamic arguments.", "items": {"type": "string", "minLength": 1}},
                 "cwd": {"type": "string", "minLength": 1, "description": "Optional working directory for the command."},
                 "timeout": {"type": "integer", "minimum": 1, "maximum": 600000, "description": "Timeout in milliseconds."},
                 "description": {"type": "string", "minLength": 1, "description": "Human-readable purpose; required for high-risk commands."},
                 "_ack": {"type": "string", "minLength": 1, "description": "Acknowledgement token reserved for risky operations."},
             },
             [],
-            oneOf=[{"required": ["command"]}, {"required": ["argv"]}],
         ),
         RUN_BASH_ANNOTATIONS,
     ),

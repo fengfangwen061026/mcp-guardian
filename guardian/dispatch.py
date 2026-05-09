@@ -138,6 +138,8 @@ def _pre_validate_run_bash(params: dict) -> dict | None:
     has_argv = "argv" in params and params.get("argv") is not None
     if has_command and has_argv:
         return {"success": False, "error": "command 和 argv 只能二选一", "error_class": "MODEL_ERROR", "error_type": "ValidationError"}
+    if not has_command and not has_argv:
+        return {"success": False, "error": "必须提供 command 或 argv", "error_class": "MODEL_ERROR", "error_type": "ValidationError"}
     if params.get("cwd"):
         if violation := check_path_allowed(params["cwd"], "cwd"):
             return violation
